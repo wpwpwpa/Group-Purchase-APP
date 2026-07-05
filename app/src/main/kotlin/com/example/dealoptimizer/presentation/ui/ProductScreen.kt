@@ -1,0 +1,470 @@
+package com.example.dealoptimizer.presentation.ui
+
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.dealoptimizer.data.model.Product
+import com.example.dealoptimizer.presentation.viewmodel.ProductViewModel
+import kotlin.math.roundToInt
+
+private val upperClothingOptions = listOf("上衣", "外套", "卫衣", "衬衫", "毛衣", "T恤")
+private val lowerClothingOptions = listOf("裤子", "裙子", "短裤", "牛仔裤", "半身裙", "打底裤")
+private val clothingOptions = upperClothingOptions + lowerClothingOptions
+
+@Composable
+fun ProductScreen() {
+    val viewModel: ProductViewModel = hiltViewModel()
+    val products = viewModel.allProducts.collectAsState(emptyList()).value
+    val savedAddButtonOffset = viewModel.addButtonOffset.collectAsState().value
+    var showDialog by remember { mutableStateOf(false) }
+    var editingProduct by remember { mutableStateOf<Product?>(null) }
+    var selectedName by remember { mutableStateOf(clothingOptions.first()) }
+    var priceDigits by remember { mutableStateOf(listOf(0, 0, 9, 9)) }
+    var isRequired by remember { mutableStateOf(false) }
+
+    fun startAdd() {
+        editingProduct = null
+        selectedName = clothingOptions.first()
+        priceDigits = listOf(0, 0, 9, 9)
+        isRequired = false
+        showDialog = true
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("商品列表") },
+                backgroundColor = MaterialTheme.colors.surface,
+                contentColor = AppInk,
+                elevation = 1.dp
+            )
+        }
+    ) { padding ->
+        BoxWithConstraints(
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
+        ) {
+            val density = LocalDensity.current
+            val buttonSize = 64.dp
+            val buttonEdgePadding = 16.dp
+            val buttonSizePx = with(density) { buttonSize.toPx() }
+            val maxButtonX = (with(density) { maxWidth.toPx() } - buttonSizePx).coerceAtLeast(0f)
+            val maxButtonY = (with(density) { maxHeight.toPx() } - buttonSizePx).coerceAtLeast(0f)
+            val startButtonOffset = with(density) {
+                Offset(
+                    (maxWidth.toPx() - buttonSizePx - buttonEdgePadding.toPx()).coerceIn(0f, maxButtonX),
+                    (maxHeight.toPx() * 2f / 3f - buttonSizePx / 2f).coerceIn(0f, maxButtonY)
+                )
+            }
+            var addButtonOffset by remember(savedAddButtonOffset) {
+                mutableStateOf(
+                    savedAddButtonOffset
+                        ?.let { Offset(it.first, it.second) }
+                        ?: startButtonOffset
+                )
+            }
+
+            LaunchedEffect(maxButtonX, maxButtonY) {
+                addButtonOffset = addButtonOffset.coerceInBounds(maxButtonX, maxButtonY)
+                viewModel.updateAddButtonOffset(addButtonOffset.x, addButtonOffset.y)
+            }
+
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 12.dp, top = 12.dp, end = 12.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                if (products.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 48.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(text = "暂无商品，点击右侧按钮添加", color = AppMuted)
+                        }
+                    }
+                } else {
+                    items(products) { product ->
+                        ProductCard(
+                            product = product,
+                            onEdit = {
+                                editingProduct = product
+                                selectedName = clothingOptions.firstOrNull { product.name.startsWith(it) } ?: clothingOptions.first()
+                                priceDigits = product.originalPrice.toInt().coerceIn(0, 9999).toDigits()
+                                isRequired = product.isRequired
+                                showDialog = true
+                            },
+                            onDelete = { viewModel.deleteProduct(product.id) },
+                            onToggleRequired = {
+                                viewModel.updateProduct(product.copy(isRequired = !product.isRequired))
+                            }
+                        )
+                    }
+                }
+            }
+            AddProductFloatingButton(
+                onClick = { startAdd() },
+                modifier = Modifier
+                    .offset {
+                        IntOffset(
+                            addButtonOffset.x.roundToInt(),
+                            addButtonOffset.y.roundToInt()
+                        )
+                    }
+                    .pointerInput(maxButtonX, maxButtonY) {
+                        detectDragGestures(
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                addButtonOffset = Offset(
+                                    x = addButtonOffset.x + dragAmount.x,
+                                    y = addButtonOffset.y + dragAmount.y
+                                ).coerceInBounds(maxButtonX, maxButtonY)
+                                viewModel.updateAddButtonOffset(addButtonOffset.x, addButtonOffset.y)
+                            }
+                        )
+                    }
+            )
+        }
+    }
+
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text(if (editingProduct == null) "添加商品" else "编辑商品") },
+            text = {
+                Column {
+                    Text("商品名称", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    ClothingNamePicker(
+                        selectedName = selectedName,
+                        onSelect = { selectedName = it }
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("吊牌价格", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    PriceWheel(
+                        digits = priceDigits,
+                        onDigitStep = { index, step ->
+                            priceDigits = priceDigits.toMutableList().also { digits ->
+                                digits[index] = (digits[index] + step).wrapDigit()
+                            }
+                        }
+                    )
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = isRequired, onCheckedChange = { isRequired = it })
+                        Text("必须购买")
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val price = priceDigits.toPrice()
+                        if (price > 0) {
+                            val finalName = if (editingProduct == null) {
+                                nextProductName(selectedName, products)
+                            } else {
+                                editingProduct?.name ?: selectedName
+                            }
+                            val product = Product(
+                                id = editingProduct?.id ?: 0,
+                                name = finalName,
+                                originalPrice = price.toDouble(),
+                                isRequired = isRequired
+                            )
+                            if (editingProduct == null) {
+                                viewModel.insertProduct(product.name, product.originalPrice, product.isRequired)
+                            } else {
+                                viewModel.updateProduct(product)
+                            }
+                            showDialog = false
+                        }
+                    }
+                ) {
+                    Text("确认")
+                }
+            },
+            dismissButton = {
+                Button(onClick = { showDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun AddProductFloatingButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Button(
+        onClick = onClick,
+        shape = CircleShape,
+        modifier = modifier.size(64.dp),
+        contentPadding = PaddingValues(0.dp),
+        elevation = ButtonDefaults.elevation(defaultElevation = 8.dp, pressedElevation = 4.dp)
+    ) {
+        Icon(Icons.Default.Add, contentDescription = "添加商品", modifier = Modifier.size(32.dp))
+    }
+}
+
+@Composable
+fun ClothingNamePicker(selectedName: String, onSelect: (String) -> Unit) {
+    Column(
+        modifier = Modifier.padding(top = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        ClothingOptionRow(
+            options = upperClothingOptions,
+            selectedName = selectedName,
+            onSelect = onSelect
+        )
+        ClothingOptionRow(
+            options = lowerClothingOptions,
+            selectedName = selectedName,
+            onSelect = onSelect
+        )
+    }
+}
+
+@Composable
+fun ClothingOptionRow(
+    options: List<String>,
+    selectedName: String,
+    onSelect: (String) -> Unit
+) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(options) { option ->
+            ClothingOptionButton(
+                option = option,
+                selected = option == selectedName,
+                onSelect = onSelect
+            )
+        }
+    }
+}
+
+@Composable
+fun ClothingOptionButton(option: String, selected: Boolean, onSelect: (String) -> Unit) {
+    OutlinedButton(
+        onClick = { onSelect(option) },
+        shape = RoundedCornerShape(20.dp),
+        border = BorderStroke(1.dp, if (selected) MaterialTheme.colors.primary else AppLine),
+        colors = ButtonDefaults.outlinedButtonColors(
+            backgroundColor = if (selected) MaterialTheme.colors.primary.copy(alpha = 0.08f) else MaterialTheme.colors.surface,
+            contentColor = if (selected) MaterialTheme.colors.primary else AppInk
+        )
+    ) {
+        Text(option, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+    }
+}
+
+@Composable
+fun PriceWheel(digits: List<Int>, onDigitStep: (Int, Int) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        digits.forEachIndexed { index, digit ->
+            DigitWheel(
+                digit = digit,
+                onStep = { step ->
+                    onDigitStep(index, step)
+                },
+                modifier = Modifier.width(52.dp)
+            )
+        }
+        Text("元", fontWeight = FontWeight.Bold, color = AppMuted, modifier = Modifier.padding(start = 2.dp))
+    }
+}
+
+@Composable
+fun DigitWheel(
+    digit: Int,
+    onStep: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val currentOnStep by rememberUpdatedState(onStep)
+    val stepPx = with(LocalDensity.current) { 30.dp.toPx() }
+    var dragAccumulator by remember { mutableStateOf(0f) }
+    val wheelShape = RoundedCornerShape(12.dp)
+
+    Card(
+        modifier = modifier
+            .height(112.dp)
+            .clip(wheelShape)
+            .pointerInput(stepPx) {
+                detectVerticalDragGestures(
+                    onDragStart = { dragAccumulator = 0f },
+                    onDragEnd = { dragAccumulator = 0f },
+                    onDragCancel = { dragAccumulator = 0f },
+                    onVerticalDrag = { change, dragAmount ->
+                        change.consume()
+                        dragAccumulator += dragAmount
+
+                        var steps = 0
+                        while (dragAccumulator <= -stepPx) {
+                            steps += 1
+                            dragAccumulator += stepPx
+                        }
+                        while (dragAccumulator >= stepPx) {
+                            steps -= 1
+                            dragAccumulator -= stepPx
+                        }
+                        if (steps != 0) {
+                            currentOnStep(steps)
+                        }
+                    }
+                )
+            },
+        shape = wheelShape,
+        elevation = 2.dp,
+        border = BorderStroke(1.dp, AppLine),
+        backgroundColor = MaterialTheme.colors.surface
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFFF8FAFC))
+        ) {
+            Text(
+                text = ((digit + 9) % 10).toString(),
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .wrapContentHeight(),
+                textAlign = TextAlign.Center,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = AppMuted.copy(alpha = 0.5f)
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .background(MaterialTheme.colors.primary.copy(alpha = 0.1f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = digit.toString(),
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = AppInk
+                )
+            }
+            Text(
+                text = ((digit + 1) % 10).toString(),
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .wrapContentHeight(),
+                textAlign = TextAlign.Center,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = AppMuted.copy(alpha = 0.5f)
+            )
+        }
+    }
+}
+
+@Composable
+fun ProductCard(product: Product, onEdit: () -> Unit, onDelete: () -> Unit, onToggleRequired: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        elevation = 1.dp,
+        backgroundColor = MaterialTheme.colors.surface
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(text = product.name, fontWeight = FontWeight.Bold)
+                    if (product.isRequired) {
+                        Badge(
+                            modifier = Modifier.padding(start = 8.dp),
+                            backgroundColor = MaterialTheme.colors.error
+                        ) {
+                            Text(text = "必买", fontSize = 10.sp)
+                        }
+                    }
+                }
+                Text(text = "¥${"%.2f".format(product.originalPrice)}", color = AppMuted)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(
+                    checked = product.isRequired,
+                    onCheckedChange = { onToggleRequired() }
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                IconButton(onClick = onEdit) {
+                    Icon(Icons.Default.Edit, contentDescription = "编辑")
+                }
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Default.Delete, contentDescription = "删除", tint = MaterialTheme.colors.error)
+                }
+            }
+        }
+    }
+}
+
+private fun Int.toDigits(): List<Int> {
+    return toString().padStart(4, '0').takeLast(4).map { it.digitToInt() }
+}
+
+private fun List<Int>.toPrice(): Int {
+    return joinToString("").toIntOrNull() ?: 0
+}
+
+private fun Int.wrapDigit(): Int {
+    return ((this % 10) + 10) % 10
+}
+
+private fun nextProductName(baseName: String, products: List<Product>): String {
+    val sameBaseCount = products.count { product ->
+        product.name == baseName || product.name.matches(Regex("^${Regex.escape(baseName)}\\d+$"))
+    }
+    return if (sameBaseCount == 0) baseName else "$baseName${sameBaseCount + 1}"
+}
+
+private fun Offset.coerceInBounds(maxX: Float, maxY: Float): Offset {
+    return Offset(
+        x = x.coerceIn(0f, maxX),
+        y = y.coerceIn(0f, maxY)
+    )
+}
