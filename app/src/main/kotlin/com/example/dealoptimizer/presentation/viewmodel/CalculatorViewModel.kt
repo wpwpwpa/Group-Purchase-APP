@@ -35,6 +35,24 @@ class CalculatorViewModel @Inject constructor(
     private val _allCoupons = MutableStateFlow<List<Coupon>>(emptyList())
     val allCoupons: StateFlow<List<Coupon>> = _allCoupons
 
+    init {
+        viewModelScope.launch(Dispatchers.IO) {
+            productRepository.allProducts.collect { products ->
+                _allProducts.value = products
+            }
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            couponRepository.allCoupons.collect { coupons ->
+                _allCoupons.value = coupons
+            }
+        }
+    }
+
+    fun clearCalculation() {
+        _solution.value = null
+        _comparisonResult.value = null
+    }
+
     fun calculateBestPrice(useFillProducts: Boolean = false) {
         viewModelScope.launch(Dispatchers.IO) {
             val products = productRepository.allProducts.first()

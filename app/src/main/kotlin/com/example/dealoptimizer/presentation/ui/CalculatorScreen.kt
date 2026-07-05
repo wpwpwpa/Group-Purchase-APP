@@ -45,6 +45,13 @@ private data class DiscountSummaryRow(
     val discount: Double
 )
 
+private data class CalculationInputSignature(
+    val products: List<Product>,
+    val coupons: List<Coupon>,
+    val selectedProductIds: Set<Long>,
+    val useFillProducts: Boolean
+)
+
 @Composable
 fun CalculatorScreen() {
     val viewModel: CalculatorViewModel = hiltViewModel()
@@ -53,24 +60,37 @@ fun CalculatorScreen() {
     val allProducts = viewModel.allProducts.collectAsState().value
     val allCoupons = viewModel.allCoupons.collectAsState().value
     var selectedProductIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var knownProductIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var lastCalculationInput by remember { mutableStateOf<CalculationInputSignature?>(null) }
     var useFillProducts by remember { mutableStateOf(false) }
     val selectedProducts = allProducts.filter { it.id in selectedProductIds || it.isRequired }
     val droppedProducts = allProducts.filter { it.id !in selectedProducts.map { product -> product.id }.toSet() }
 
-    LaunchedEffect(Unit) {
-        if (solution == null) {
-            viewModel.calculateBestPrice(useFillProducts)
-        }
-    }
-
     LaunchedEffect(allProducts) {
-        if (allProducts.isNotEmpty() && selectedProductIds.isEmpty()) {
-            selectedProductIds = allProducts.map { it.id }.toSet()
+        val currentProductIds = allProducts.map { it.id }.toSet()
+        selectedProductIds = if (knownProductIds.isEmpty() && selectedProductIds.isEmpty()) {
+            currentProductIds
+        } else {
+            (selectedProductIds intersect currentProductIds) + (currentProductIds - knownProductIds)
         }
+        knownProductIds = currentProductIds
     }
 
-    LaunchedEffect(selectedProductIds, allProducts, allCoupons, solution) {
-        if (solution == null && allProducts.isNotEmpty() && allCoupons.isNotEmpty()) {
+    LaunchedEffect(selectedProductIds, allProducts, allCoupons, useFillProducts) {
+        val calculationInput = CalculationInputSignature(
+            products = allProducts,
+            coupons = allCoupons,
+            selectedProductIds = selectedProducts.map { it.id }.toSet(),
+            useFillProducts = useFillProducts
+        )
+        if (calculationInput == lastCalculationInput) {
+            return@LaunchedEffect
+        }
+        lastCalculationInput = calculationInput
+
+        if (allProducts.isEmpty() || allCoupons.isEmpty() || selectedProducts.isEmpty()) {
+            viewModel.clearCalculation()
+        } else {
             viewModel.calculateForProducts(selectedProducts, useFillProducts)
         }
     }
@@ -83,7 +103,7 @@ fun CalculatorScreen() {
                 contentColor = AppInk,
                 elevation = 1.dp,
                 actions = {
-                    IconButton(onClick = { viewModel.calculateBestPrice(useFillProducts) }) {
+                    IconButton(onClick = { viewModel.calculateForProducts(selectedProducts, useFillProducts) }) {
                         Icon(Icons.Default.Settings, contentDescription = "计算")
                     }
                 }
@@ -132,10 +152,6 @@ fun CalculatorScreen() {
                                     selectedProductIds + product.id
                                 }
                                 selectedProductIds = nextSelectedProductIds
-                                val nextSelectedProducts = allProducts.filter {
-                                    it.id in nextSelectedProductIds || it.isRequired
-                                }
-                                viewModel.calculateForProducts(nextSelectedProducts, useFillProducts)
                             }
                         )
                     }
@@ -191,13 +207,7 @@ fun CalculatorScreen() {
             FillProductFloatingButton(
                 checked = useFillProducts,
                 onClick = {
-                    val nextUseFillProducts = !useFillProducts
-                    useFillProducts = nextUseFillProducts
-                    if (selectedProducts.isNotEmpty()) {
-                        viewModel.calculateForProducts(selectedProducts, nextUseFillProducts)
-                    } else {
-                        viewModel.calculateBestPrice(nextUseFillProducts)
-                    }
+                    useFillProducts = !useFillProducts
                 },
                 modifier = Modifier
                     .offset {
