@@ -9,6 +9,7 @@ local.properties
 .idea/
 .claude/
 .codex/
+.workbuddy/
 
 # Generated files
 captures/
