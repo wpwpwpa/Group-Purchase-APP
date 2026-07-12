@@ -13,7 +13,7 @@ interface ProductDao {
     fun getAllProducts(): Flow<List<Product>>
 
     @Insert
-    suspend fun insertProduct(product: Product)
+    suspend fun insertProduct(product: Product): Long
 
     @Update
     suspend fun updateProduct(product: Product)

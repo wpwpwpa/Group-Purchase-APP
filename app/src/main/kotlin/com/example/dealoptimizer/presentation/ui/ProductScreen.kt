@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -53,6 +54,7 @@ fun ProductScreen() {
     val users = viewModel.allUsers.collectAsState(emptyList()).value
     val checkedUsers = viewModel.checkedUsers.collectAsState(emptyList()).value
     val savedAddButtonOffset = viewModel.addButtonOffset.collectAsState().value
+    val canUndo = viewModel.canUndo.collectAsState(false).value
     var showDialog by remember { mutableStateOf(false) }
     var editingProduct by remember { mutableStateOf<Product?>(null) }
     var selectedName by remember { mutableStateOf(clothingOptions.first()) }
@@ -105,6 +107,16 @@ fun ProductScreen() {
                         }
                     },
                     actions = {
+                        IconButton(
+                            onClick = { viewModel.undo() },
+                            enabled = canUndo
+                        ) {
+                            Icon(
+                                Icons.Default.ArrowBack,
+                                contentDescription = "撤回",
+                                tint = if (canUndo) AppInk else AppMuted
+                            )
+                        }
                         IconButton(onClick = { viewModel.deleteAllProducts() }) {
                             Icon(Icons.Default.Delete, contentDescription = "清空全部", tint = MaterialTheme.colors.error)
                         }
@@ -186,7 +198,7 @@ fun ProductScreen() {
                                     products = userProducts,
                                     openProductId = openProductId,
                                     onOpenChange = { openProductId = it },
-                                    onClear = { viewModel.clearByOwner(user.id) },
+                                    onClear = { viewModel.clearByOwner(user.id, userProducts) },
                                     onEdit = { p ->
                                         editingProduct = p
                                         selectedColor = p.color
@@ -201,7 +213,7 @@ fun ProductScreen() {
                                     onToggleRequired = { p ->
                                         viewModel.updateProduct(p.copy(isRequired = !p.isRequired))
                                     },
-                                    onDelete = { p -> viewModel.deleteProduct(p.id) },
+                                    onDelete = { p -> viewModel.deleteProduct(p) },
                                     onAdd = { startAdd(it.id) }
                                 )
                             }
@@ -288,7 +300,7 @@ fun ProductScreen() {
                         if (editingProduct != null) {
                             Button(
                                 onClick = {
-                                    viewModel.deleteProduct(editingProduct!!.id)
+                                    viewModel.deleteProduct(editingProduct!!)
                                     showDialog = false
                                 },
                                 colors = ButtonDefaults.buttonColors(
