@@ -31,6 +31,8 @@ private val CardMinWidth = 105.dp
 fun UserProductSection(
     user: User,
     products: List<Product>,
+    openProductId: Long?,
+    onOpenChange: (Long?) -> Unit,
     onClear: () -> Unit,
     onEdit: (Product) -> Unit,
     onToggleRequired: (Product) -> Unit,
@@ -82,6 +84,8 @@ fun UserProductSection(
                             items = items,
                             colCount = colCount,
                             gap = gap,
+                            openProductId = openProductId,
+                            onOpenChange = onOpenChange,
                             onEdit = onEdit,
                             onToggleRequired = onToggleRequired,
                             onDelete = onDelete
@@ -92,6 +96,8 @@ fun UserProductSection(
                             items = unmatched,
                             colCount = colCount,
                             gap = gap,
+                            openProductId = openProductId,
+                            onOpenChange = onOpenChange,
                             onEdit = onEdit,
                             onToggleRequired = onToggleRequired,
                             onDelete = onDelete
@@ -108,6 +114,8 @@ private fun TypeBlock(
     items: List<Product>,
     colCount: Int,
     gap: androidx.compose.ui.unit.Dp,
+    openProductId: Long?,
+    onOpenChange: (Long?) -> Unit,
     onEdit: (Product) -> Unit,
     onToggleRequired: (Product) -> Unit,
     onDelete: (Product) -> Unit
@@ -121,6 +129,8 @@ private fun TypeBlock(
                         onClick = { onEdit(product) },
                         onToggleRequired = { onToggleRequired(product) },
                         onDelete = { onDelete(product) },
+                        openProductId = openProductId,
+                        onOpenChange = onOpenChange,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -166,6 +176,8 @@ fun ProductMiniCard(
     onClick: () -> Unit,
     onToggleRequired: () -> Unit,
     onDelete: () -> Unit,
+    openProductId: Long?,
+    onOpenChange: (Long?) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val required = product.isRequired
@@ -177,7 +189,11 @@ fun ProductMiniCard(
     val deleteWidth = 56.dp
     val deleteWidthPx = with(density) { deleteWidth.toPx() }
     var offsetX by remember { mutableStateOf(0f) }
-    var isOpen by remember { mutableStateOf(false) }
+    val isOpen = openProductId == product.id
+
+    LaunchedEffect(isOpen) {
+        offsetX = if (isOpen) -deleteWidthPx else 0f
+    }
 
     Box(modifier = modifier) {
         // 底层：左滑后露出的删除区（右侧红底 + 删除图标）
@@ -207,15 +223,16 @@ fun ProductMiniCard(
                         offsetX = (offsetX + delta).coerceIn(-deleteWidthPx, 0f)
                     },
                     onDragStopped = {
-                        isOpen = offsetX <= -deleteWidthPx / 2f
-                        offsetX = if (isOpen) -deleteWidthPx else 0f
+                        val shouldOpen = offsetX <= -deleteWidthPx / 2f
+                        offsetX = if (shouldOpen) -deleteWidthPx else 0f
+                        onOpenChange(if (shouldOpen) product.id else null)
                     }
                 )
                 .clickable {
                     if (isOpen) {
-                        isOpen = false
-                        offsetX = 0f
+                        onOpenChange(null)
                     } else {
+                        onOpenChange(null)
                         onClick()
                     }
                 },

@@ -253,21 +253,29 @@ class CalculatorViewModel @Inject constructor(
                 BundleSolution(poolProducts, emptyList(), poolProducts.sumOf { it.originalPrice }, poolProducts.sumOf { it.originalPrice })
             }
 
-            // 合并解（供 UI 展示）：perUser 单人组 + 跨用户凑单组 + 未达标商品
-            val mergedUsages = perUserLockedUsages.values.flatten() + crossPool.couponUsages
-            val combined = BundleSolution(
-                products = scoped,
-                couponUsages = mergedUsages,
-                originalTotal = scoped.sumOf { it.originalPrice },
-                finalPrice = mergedUsages.sumOf { usage ->
-                    when (usage.coupon.type) {
-                        CouponType.FULL_REDUCTION -> usage.count * usage.coupon.discountValue
-                        CouponType.DISCOUNT -> usage.productGroup.sumOf { it.originalPrice } * (usage.coupon.discountValue / 100) * usage.count
-                        CouponType.NO_THRESHOLD -> usage.count * usage.coupon.discountValue
-                    }
-                }.let { totalDiscount -> scoped.sumOf { it.originalPrice } - totalDiscount },
-                fillProducts = (perUser.values.flatMap { it.fillProducts } + crossPool.fillProducts).distinctBy { it.name }
-            )
+            // 合并解（供 UI 展示）
+            val combined: BundleSolution = if (isStackable) {
+                // 叠加券：在合并后的总价上整量重算（count=floor(合并总价/阈值)，通常多于各人单独之和）。
+                // 这才是真正的「合并凑单」优惠——合并的实惠正来自此处，不能用各人单独用券简单相加
+                // （否则 combined 优惠恒等于各人之和，incrementalDiscount 永远为 0，合并永无额外节省）。
+                discountCalculator.calculateBestCombination(scoped, enabledCoupons, fillProducts, useFillProducts)
+            } else {
+                // 单用券：先自组后凑单，合并两组用券
+                val mergedUsages = perUserLockedUsages.values.flatten() + crossPool.couponUsages
+                BundleSolution(
+                    products = scoped,
+                    couponUsages = mergedUsages,
+                    originalTotal = scoped.sumOf { it.originalPrice },
+                    finalPrice = mergedUsages.sumOf { usage ->
+                        when (usage.coupon.type) {
+                            CouponType.FULL_REDUCTION -> usage.count * usage.coupon.discountValue
+                            CouponType.DISCOUNT -> usage.productGroup.sumOf { it.originalPrice } * (usage.coupon.discountValue / 100) * usage.count
+                            CouponType.NO_THRESHOLD -> usage.count * usage.coupon.discountValue
+                        }
+                    }.let { totalDiscount -> scoped.sumOf { it.originalPrice } - totalDiscount },
+                    fillProducts = (perUser.values.flatMap { it.fillProducts } + crossPool.fillProducts).distinctBy { it.name }
+                )
+            }
 
             // 分摊计算：叠加券用增量优惠+余量占比；单用券按「先自组后凑单」逐组聚合
             val incrementalDiscount = if (isStackable) {

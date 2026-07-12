@@ -3,6 +3,8 @@ package com.example.dealoptimizer.presentation.ui
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -32,6 +34,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.dealoptimizer.data.model.Product
 import com.example.dealoptimizer.data.model.User
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import com.example.dealoptimizer.presentation.viewmodel.ProductViewModel
 import kotlin.math.roundToInt
@@ -57,6 +60,7 @@ fun ProductScreen() {
     var isRequired by remember { mutableStateOf(false) }
     var selectedOwnerId by remember { mutableStateOf(1L) }
     var selectedColor by remember { mutableStateOf("") }
+    var openProductId by remember { mutableStateOf<Long?>(null) }
 
     fun startAdd() {
         editingProduct = null
@@ -73,7 +77,7 @@ fun ProductScreen() {
 
     ModalDrawer(
         drawerState = drawerState,
-        gesturesEnabled = false,
+        gesturesEnabled = openProductId == null,
         drawerContent = {
             UserDrawerContent(
                 users = users,
@@ -112,6 +116,21 @@ fun ProductScreen() {
                 modifier = Modifier
                     .padding(padding)
                     .fillMaxSize()
+                    .pointerInput(openProductId) {
+                        if (openProductId != null) {
+                            coroutineScope {
+                                launch {
+                                    detectTapGestures(onTap = { openProductId = null })
+                                }
+                                launch {
+                                    detectHorizontalDragGestures(
+                                        onHorizontalDrag = { change, _ -> change.consume() },
+                                        onDragEnd = { openProductId = null }
+                                    )
+                                }
+                            }
+                        }
+                    }
             ) {
                 val density = LocalDensity.current
                 val buttonSize = 64.dp
@@ -165,6 +184,8 @@ fun ProductScreen() {
                                 UserProductSection(
                                     user = user,
                                     products = userProducts,
+                                    openProductId = openProductId,
+                                    onOpenChange = { openProductId = it },
                                     onClear = { viewModel.clearByOwner(user.id) },
                                     onEdit = { p ->
                                         editingProduct = p

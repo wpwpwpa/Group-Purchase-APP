@@ -239,8 +239,8 @@ fun CalculatorScreen() {
                     }
                 }
 
-                // 多用户方案对比：现状 vs 全局，二选一应用
-                if (checkedUsers.isNotEmpty() && candidateOptions.size >= 2) {
+                // 多用户方案对比：现状 vs 全局，二选一应用（单用券场景才展示，叠加券不展示）
+                if (!couponMode && checkedUsers.isNotEmpty() && candidateOptions.size >= 2) {
                     item {
                         CandidateCompareCard(
                             candidates = candidateOptions,
