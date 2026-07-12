@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.runtime.*
@@ -24,7 +25,8 @@ fun UserDrawerContent(
     onRenameUser: (User, String) -> Unit,
     onDeleteUser: (User) -> Unit,
     onToggleChecked: (User, Boolean) -> Unit,
-    onUncheckAll: () -> Unit
+    onUncheckAll: () -> Unit,
+    onClose: () -> Unit
 ) {
     var showAddDialog by remember { mutableStateOf(false) }
     var editingUser by remember { mutableStateOf<User?>(null) }
@@ -38,10 +40,17 @@ fun UserDrawerContent(
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(text = "用户管理", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                IconButton(onClick = onClose, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = "关闭", tint = AppInk)
+                }
+                Text(
+                    text = "用户管理",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp,
+                    modifier = Modifier.weight(1f)
+                )
                 TextButton(onClick = onUncheckAll) {
                     Text("一键取消勾选", fontSize = 13.sp)
                 }

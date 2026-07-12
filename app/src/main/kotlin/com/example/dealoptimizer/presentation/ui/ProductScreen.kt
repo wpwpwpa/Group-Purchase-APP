@@ -73,6 +73,7 @@ fun ProductScreen() {
 
     ModalDrawer(
         drawerState = drawerState,
+        gesturesEnabled = false,
         drawerContent = {
             UserDrawerContent(
                 users = users,
@@ -82,7 +83,8 @@ fun ProductScreen() {
                 onToggleChecked = { u, c -> viewModel.setUserChecked(u, c) },
                 onUncheckAll = {
                     users.forEach { if (!it.isDefault) viewModel.setUserChecked(it, false) }
-                }
+                },
+                onClose = { scope.launch { drawerState.close() } }
             )
         }
     ) {
@@ -94,7 +96,7 @@ fun ProductScreen() {
                     contentColor = AppInk,
                     elevation = 1.dp,
                     navigationIcon = {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                        IconButton(onClick = { scope.launch { if (drawerState.isOpen) drawerState.close() else drawerState.open() } }) {
                             Icon(Icons.Default.Menu, contentDescription = "用户管理")
                         }
                     },

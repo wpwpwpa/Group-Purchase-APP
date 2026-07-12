@@ -1,21 +1,29 @@
 package com.example.dealoptimizer.presentation.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.dealoptimizer.data.model.Product
 import com.example.dealoptimizer.data.model.User
+import kotlin.math.roundToInt
 
 private val CardMinWidth = 105.dp
 
@@ -60,7 +68,7 @@ fun UserProductSection(
                 )
             } else {
                 val gap = 8.dp
-                val colCount = 2
+                val colCount = 3
                 // 按四大类型分组，保持顺序：上半身→下半身→全身→饰品
                 val categoryOrder = listOf("上半身", "下半身", "全身", "饰品")
                 val categoryItems = categoryOrder.map { cat ->
@@ -164,52 +172,83 @@ fun ProductMiniCard(
     val category = resolveCategory(product)
     val bgColor = categoryBackground[category] ?: MaterialTheme.colors.surface
     val borderColor = categoryBorder[category] ?: AppLine
-    Card(
-        modifier = modifier
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(8.dp),
-        elevation = 1.dp,
-        border = if (required) BorderStroke(1.5.dp, Color(0xFFE24B4A)) else BorderStroke(1.dp, borderColor),
-        backgroundColor = if (required) Color(0xFFFEE2E2) else bgColor
-    ) {
-        Row(
-            modifier = Modifier.padding(10.dp),
-            verticalAlignment = Alignment.CenterVertically
+
+    val density = LocalDensity.current
+    val deleteWidth = 56.dp
+    val deleteWidthPx = with(density) { deleteWidth.toPx() }
+    var offsetX by remember { mutableStateOf(0f) }
+    var isOpen by remember { mutableStateOf(false) }
+
+    Box(modifier = modifier) {
+        // 底层：左滑后露出的删除区（右侧红底 + 删除图标）
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .background(Color(0xFFE24B4A), RoundedCornerShape(8.dp))
+                .clickable { onDelete() },
+            contentAlignment = Alignment.CenterEnd
         ) {
-            // 左侧：名称 + 价格
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
-                Text(
-                    text = product.name,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp,
-                    maxLines = 1
+            Icon(
+                imageVector = Icons.Default.Delete,
+                contentDescription = "删除",
+                tint = Color.White,
+                modifier = Modifier
+                    .padding(end = 16.dp)
+                    .size(22.dp)
+            )
+        }
+        // 前景：卡片内容（随 offset 平移，手势挂在卡片本身以跟随平移）
+        Card(
+            modifier = Modifier
+                .offset { IntOffset(offsetX.roundToInt(), 0) }
+                .draggable(
+                    orientation = Orientation.Horizontal,
+                    state = rememberDraggableState { delta ->
+                        offsetX = (offsetX + delta).coerceIn(-deleteWidthPx, 0f)
+                    },
+                    onDragStopped = {
+                        isOpen = offsetX <= -deleteWidthPx / 2f
+                        offsetX = if (isOpen) -deleteWidthPx else 0f
+                    }
                 )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = "\u00A5${"%.2f".format(product.originalPrice)}",
-                    color = AppMuted,
-                    fontSize = 12.sp
-                )
-            }
-            // 右侧：必买 Switch + 删除图标
-            Column(horizontalAlignment = Alignment.End) {
-                Switch(
-                    checked = required,
-                    onCheckedChange = { onToggleRequired() },
-                    modifier = Modifier.height(28.dp)
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                IconButton(
-                    onClick = onDelete,
-                    modifier = Modifier.size(28.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Delete,
-                        contentDescription = "删除",
-                        tint = MaterialTheme.colors.error,
-                        modifier = Modifier.size(18.dp)
+                .clickable {
+                    if (isOpen) {
+                        isOpen = false
+                        offsetX = 0f
+                    } else {
+                        onClick()
+                    }
+                },
+            shape = RoundedCornerShape(8.dp),
+            elevation = 1.dp,
+            border = if (required) BorderStroke(1.5.dp, Color(0xFFE24B4A)) else BorderStroke(1.dp, borderColor),
+            backgroundColor = if (required) Color(0xFFFEE2E2) else bgColor
+        ) {
+            Row(
+                modifier = Modifier.padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
+                    Text(
+                        text = product.name,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "¥${"%.2f".format(product.originalPrice)}",
+                        color = AppMuted,
+                        fontSize = 12.sp
                     )
                 }
+                Checkbox(
+                    checked = required,
+                    onCheckedChange = { onToggleRequired() },
+                    colors = CheckboxDefaults.colors(checkedColor = Color(0xFFE24B4A)),
+                    modifier = Modifier.size(24.dp)
+                )
             }
         }
     }
