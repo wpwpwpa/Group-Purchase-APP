@@ -32,6 +32,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -276,25 +277,57 @@ fun CalculatorScreen() {
                             }
                         }
                         if (!couponMode) {
-                            // 单用券：商品分组组合（每组=一张券）放在分摊说明 tab
+                            // 单用券：按用户视角展示分摊说明
+                            // 每个勾选用户一张块（浅蓝）：仅含自达标组 + 单独付
+                            // 凑单组（多人拼券）统一下沉到最底部绿色区
                             val groupedUsages = merged.couponUsages.filter { !it.coupon.isStackable }
-                            items(groupedUsages.size) { idx ->
-                                GroupCombinationCard(
-                                    groupIndex = idx,
-                                    usage = groupedUsages[idx],
-                                    coupons = allCoupons,
-                                    ownerNames = ownerNames
+                            items(checkedUsers.size) { idx ->
+                                PerUserCouponShareCard(
+                                    user = checkedUsers[idx],
+                                    allUsages = groupedUsages,
+                                    allProducts = merged.products,
+                                    coupons = allCoupons
                                 )
                             }
-                            val usedProductIds = groupedUsages.flatMap { it.productGroup }.map { it.id }.toSet()
-                            val remainingProducts = merged.products.filter { it.id !in usedProductIds }
-                            if (remainingProducts.isNotEmpty()) {
+                            // 底部：凑单组合（多人拼券）
+                            val poolOrNoOwnerUsages = groupedUsages.filter { usage ->
+                                val owners = usage.productGroup.map { it.ownerId }.distinct()
+                                owners.size >= 2 || owners.isEmpty()
+                            }
+                            if (poolOrNoOwnerUsages.isNotEmpty()) {
                                 item {
-                                    RemainingProductsCard(
-                                        products = remainingProducts,
-                                        coupons = allCoupons,
-                                        ownerNames = ownerNames
-                                    )
+                                    Surface(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 14.dp)
+                                            .border(1.dp, Color(0xFFA7E0C0), RoundedCornerShape(10.dp)),
+                                        color = Color(0xFFE8F8EE),
+                                        shape = RoundedCornerShape(10.dp),
+                                        elevation = 1.dp
+                                    ) {
+                                        Column(modifier = Modifier.padding(14.dp)) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    text = "凑单组合（多人拼券）",
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color(0xFF1F9254)
+                                                )
+                                                Spacer(modifier = Modifier.weight(1f))
+                                                Text(text = "按组合看谁和谁凑", fontSize = 11.sp, color = AppMuted)
+                                            }
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            poolOrNoOwnerUsages.forEachIndexed { pIdx, usage ->
+                                                GroupCombinationCard(
+                                                    groupIndex = pIdx,
+                                                    usage = usage,
+                                                    coupons = allCoupons,
+                                                    ownerNames = ownerNames,
+                                                    backgroundColor = Color(0xFFF2FCF6)
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -600,6 +633,7 @@ private fun ProductSelectionItem(
 }
 
 // 必买商品强制红（优先级最高），否则默认黑色
+@Suppress("UNUSED_PARAMETER")
 private fun Product.displayColor(_coupons: List<Coupon>): Color =
     if (isRequired) AppRed else AppInk
 
@@ -1350,11 +1384,12 @@ private fun TabLabel(text: String, selected: Boolean, onClick: () -> Unit, modif
 }
 
 @Composable
-fun GroupCombinationCard(
+private fun GroupCombinationCard(
     groupIndex: Int,
     usage: CouponUsage,
     coupons: List<Coupon>,
-    ownerNames: Map<Long, String> = emptyMap()
+    ownerNames: Map<Long, String> = emptyMap(),
+    backgroundColor: Color = Color.White
 ) {
     val productTotal = usage.productGroup.sumOf { it.originalPrice }
     val fillTotal = usage.fillProducts.sumOf { it.price }
@@ -1372,7 +1407,7 @@ fun GroupCombinationCard(
             .padding(top = 12.dp)
             .border(1.dp, AppLine.copy(alpha = 0.4f), RoundedCornerShape(8.dp)),
         shape = RoundedCornerShape(8.dp),
-        backgroundColor = Color.White,
+        backgroundColor = backgroundColor,
         elevation = 2.dp
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
@@ -1497,7 +1532,7 @@ fun GroupCombinationCard(
                                     text = " -¥${"%.2f".format(ownerDiscount)}",
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = AppRed,
+                                    color = AppInk,
                                     modifier = Modifier.padding(start = 6.dp)
                                 )
                             }
@@ -1518,8 +1553,9 @@ fun GroupCombinationCard(
                         }
                         Text(
                             text = "应付 ¥${"%.2f".format(ownerPayable)}",
-                            fontSize = 11.sp,
-                            color = AppMuted,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = AppRed,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(top = 2.dp),
@@ -1532,51 +1568,265 @@ fun GroupCombinationCard(
     }
 }
 
+/** 单用券场景下，某张券用法的总优惠（与 GroupCombinationCard 内口径一致） */
+private fun usageDiscount(usage: CouponUsage): Double {
+    val productTotal = usage.productGroup.sumOf { it.originalPrice }
+    val fillTotal = usage.fillProducts.sumOf { it.price }
+    val groupTotal = productTotal + fillTotal
+    return when (usage.coupon.type) {
+        CouponType.FULL_REDUCTION -> usage.count * usage.coupon.discountValue
+        CouponType.DISCOUNT -> groupTotal * (usage.coupon.discountValue / 100) * usage.count
+        CouponType.NO_THRESHOLD -> usage.count * usage.coupon.discountValue
+    }
+}
+
+/**
+ * 按用户视角的分摊块（浅蓝）：
+ * 块头 = 该用户实付（含凑单分摊，scheme A）；
+ * 块内仅展示「自达标组」+「单独付」，凑单组统一下沉到底部凑单组合区。
+ */
 @Composable
-fun RemainingProductsCard(
-    products: List<Product>,
-    coupons: List<Coupon>,
-    ownerNames: Map<Long, String> = emptyMap()
+private fun PerUserCouponShareCard(
+    user: User,
+    allUsages: List<CouponUsage>,
+    allProducts: List<Product>,
+    coupons: List<Coupon>
 ) {
-    Card(
+    val usedProductIds = allUsages.flatMap { it.productGroup }.map { it.id }.toSet()
+    val selfGroups = allUsages.filter { usage ->
+        val owners = usage.productGroup.map { it.ownerId }.distinct()
+        owners.size == 1 && owners[0] == user.id
+    }
+    val poolGroups = allUsages.filter { usage ->
+        val owners = usage.productGroup.map { it.ownerId }.distinct()
+        owners.size >= 2 && usage.productGroup.any { it.ownerId == user.id }
+    }
+    val separateProducts = allProducts.filter {
+        it.ownerId == user.id && it.id !in usedProductIds
+    }
+
+    // 与该用户完全无关的块不渲染
+    if (selfGroups.isEmpty() && poolGroups.isEmpty() && separateProducts.isEmpty()) return
+
+    // 汇总（含凑单分摊）
+    var totalOriginal = 0.0
+    var totalDiscount = 0.0
+    var poolDiscount = 0.0
+    selfGroups.forEach { usage ->
+        val dt = usageDiscount(usage)
+        val og = usage.productGroup.sumOf { it.originalPrice } + usage.fillProducts.sumOf { it.price }
+        totalOriginal += og
+        totalDiscount += dt
+    }
+    separateProducts.forEach { p -> totalOriginal += p.originalPrice }
+    poolGroups.forEach { usage ->
+        val dt = usageDiscount(usage)
+        val groupOriginalTotal = usage.productGroup.sumOf { it.originalPrice }
+        val userOriginal = usage.productGroup.filter { it.ownerId == user.id }.sumOf { it.originalPrice }
+        val w = if (groupOriginalTotal > 0) userOriginal / groupOriginalTotal else 0.0
+        val userDiscount = dt * w
+        totalOriginal += userOriginal
+        totalDiscount += userDiscount
+        poolDiscount += userDiscount
+    }
+    val totalPayable = totalOriginal - totalDiscount
+
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 12.dp)
-            .border(1.dp, AppLine.copy(alpha = 0.4f), RoundedCornerShape(8.dp)),
-        shape = RoundedCornerShape(8.dp),
-        backgroundColor = AppDangerSurface,
-        elevation = 2.dp
+            .border(1.dp, Color(0xFFB5D4F4), RoundedCornerShape(10.dp)),
+        color = Color(0xFFE8F4FC),
+        shape = RoundedCornerShape(10.dp),
+        elevation = 1.dp
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(
-                text = "未达标 · 无券",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                color = AppMuted
-            )
+        Column(modifier = Modifier.padding(14.dp)) {
+            // 块头：昵称 + 实付
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .background(Color(0xFF7F77DD), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = user.nickname.firstOrNull()?.toString() ?: "?",
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(text = user.nickname, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AppInk)
+                Spacer(modifier = Modifier.weight(1f))
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(text = "实付", fontSize = 11.sp, color = AppMuted)
+                    Text(
+                        text = "¥${"%.2f".format(totalPayable)}",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AppRed
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(text = "原价 ¥${"%.2f".format(totalOriginal)}", fontSize = 12.sp, color = AppMuted)
+                Text(
+                    text = "  优惠 -¥${"%.2f".format(totalDiscount)}",
+                    fontSize = 12.sp,
+                    color = AppRed,
+                    modifier = Modifier.padding(start = 8.dp)
+                )
+            }
+            if (poolDiscount > 0.01) {
+                Text(
+                    text = "（含凑单分摊 -¥${"%.2f".format(poolDiscount)}，见底部凑单组合）",
+                    fontSize = 11.sp,
+                    color = Color(0xFF1F9254),
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+
+            // 块内：自达标组 + 单独付
+            if (selfGroups.isNotEmpty() || separateProducts.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Divider(color = Color(0xFFBBBBBB).copy(alpha = 0.4f), thickness = 0.5.dp)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                selfGroups.forEach { usage ->
+                    SelfGroupMiniCard(usage = usage, coupons = coupons)
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+                if (separateProducts.isNotEmpty()) {
+                    SeparatePaymentCard(products = separateProducts, coupons = coupons)
+                }
+            } else {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "无自达标组 · 参与凑单（见底部凑单组合）",
+                    fontSize = 12.sp,
+                    color = AppMuted,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+        }
+    }
+}
+
+/** 用户块内：单人自达标组（白底小卡） */
+@Composable
+private fun SelfGroupMiniCard(usage: CouponUsage, coupons: List<Coupon>) {
+    val productTotal = usage.productGroup.sumOf { it.originalPrice }
+    val fillTotal = usage.fillProducts.sumOf { it.price }
+    val groupTotal = productTotal + fillTotal
+    val discount = usageDiscount(usage)
+    Surface(
+        color = Color.White,
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(0.5.dp, Color(0xFFB5D4F4), RoundedCornerShape(8.dp))
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = usage.coupon.displayNameWithUsageMode(),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF534AB7)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "单人组 · 自达标",
+                    fontSize = 11.sp,
+                    color = AppBlue,
+                    modifier = Modifier
+                        .background(AppBlue.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 6.dp, vertical = 1.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            usage.productGroup.forEach { product ->
+                val requiredBadge = if (product.isRequired) " · 必买" else ""
+                Text(
+                    text = "${product.name}$requiredBadge: ¥${"%.2f".format(product.originalPrice)}",
+                    fontSize = 12.sp,
+                    color = product.displayColor(coupons),
+                    modifier = Modifier.padding(top = 1.dp)
+                )
+            }
+            if (usage.fillProducts.isNotEmpty()) {
+                Text(
+                    text = "凑单: ¥${"%.2f".format(fillTotal)}",
+                    fontSize = 12.sp,
+                    color = AppGreen,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom
+            ) {
+                Text(
+                    text = "${usage.coupon.displayNameWithUsageMode()} x${usage.count}",
+                    fontSize = 11.sp,
+                    color = AppMuted
+                )
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = "¥${"%.2f".format(groupTotal)}",
+                        fontSize = 13.sp,
+                        color = AppMuted,
+                        textDecoration = TextDecoration.LineThrough,
+                        modifier = Modifier.padding(bottom = 1.dp)
+                    )
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text(text = "应付:", fontSize = 12.sp)
+                        Text(
+                            text = "¥${"%.2f".format(groupTotal - discount)}",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = AppRed
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 用户块内：未参与任何券、单独原价结算的商品（灰底小卡） */
+@Composable
+private fun SeparatePaymentCard(products: List<Product>, coupons: List<Coupon>) {
+    Surface(
+        color = Color(0xFFF5F5F5),
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(0.5.dp, AppLine.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Text(text = "单独付 · 无券", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AppMuted)
             products.forEach { product ->
                 val requiredBadge = if (product.isRequired) " · 必买" else ""
-                val ownerPrefix = ownerNames[product.ownerId]?.let { "$it · " } ?: ""
                 Text(
-                    text = "${ownerPrefix}${product.name}$requiredBadge: ¥${"%.2f".format(product.originalPrice)}",
+                    text = "${product.name}$requiredBadge: ¥${"%.2f".format(product.originalPrice)}",
                     fontSize = 12.sp,
                     color = product.displayColor(coupons),
                     modifier = Modifier.padding(top = 2.dp)
                 )
             }
-            val remainingTotal = products.sumOf { it.originalPrice }
+            val total = products.sumOf { it.originalPrice }
             Text(
-                text = "各自低于门槛，且无其他低于门槛的人可与之凑单，暂原价结算",
-                fontSize = 11.sp,
-                color = AppMuted,
-                modifier = Modifier.padding(top = 4.dp)
-            )
-            Text(
-                text = "应付: ¥${"%.2f".format(remainingTotal)}",
-                fontSize = 14.sp,
+                text = "应付: ¥${"%.2f".format(total)}",
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
                 color = AppMuted,
-                modifier = Modifier.padding(top = 2.dp)
+                modifier = Modifier.padding(top = 4.dp)
             )
         }
     }
