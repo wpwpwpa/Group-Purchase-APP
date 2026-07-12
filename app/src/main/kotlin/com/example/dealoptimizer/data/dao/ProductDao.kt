@@ -13,7 +13,7 @@ interface ProductDao {
     fun getAllProducts(): Flow<List<Product>>
 
     @Insert
-    suspend fun insertProduct(product: Product)
+    suspend fun insertProduct(product: Product): Long
 
     @Update
     suspend fun updateProduct(product: Product)
@@ -23,6 +23,9 @@ interface ProductDao {
 
     @Query("DELETE FROM products")
     suspend fun deleteAllProducts()
+
+    @Query("DELETE FROM products WHERE ownerId = :ownerId")
+    suspend fun deleteProductsByOwner(ownerId: Long)
 
     @Query("SELECT SUM(originalPrice) FROM products")
     suspend fun getTotalPrice(): Double?

@@ -13,8 +13,9 @@ android {
         applicationId "com.example.dealoptimizer"
         minSdk 24
         targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        def buildStamp = (System.currentTimeMillis().intdiv(60000)) as int
+        versionCode = buildStamp
+        versionName = "1.0.debug.${buildStamp}"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -79,4 +80,17 @@ dependencies {
     androidTestImplementation "androidx.compose.ui:ui-test-junit4:1.5.4"
     debugImplementation "androidx.compose.ui:ui-tooling:1.5.4"
     debugImplementation "androidx.compose.ui:ui-test-manifest:1.5.4"
+}
+
+// 导出 Room 数据库 schema JSON 到 app/schemas/，供迁移校验与 Room 官方迁移测试使用。
+// 需配合 AppDatabase.kt 的 exportSchema = true。生成的 schema 文件首次构建后生成，需提交进 Git。
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
+// 向后兼容：AGP 8.x 移除了裸名 unitTestClasses 聚合任务，注册别名避免旧命令/工具报错
+tasks.register('unitTestClasses') {
+    dependsOn 'compileDebugUnitTestKotlin'
+    group = 'verification'
+    description = 'Alias for compileDebugUnitTestKotlin (AGP 8.x removed the bare unitTestClasses task).'
 }

@@ -326,4 +326,48 @@ class DiscountCalculatorTest {
         assertEquals(2, solution.couponUsages.first().productGroup.size)
         assertTrue(solution.couponUsages.first().fillProducts.isEmpty())
     }
+
+    @Test
+    fun greedyPathUsedForMoreThan16ProductsPicksValidCheapestPrice() {
+        // 17 件商品触发贪心分支（>16），验证不崩溃且结果合理：
+        // 每件 30，合计 510；满100减20，贪心每组 4 件(120) 减 20 → 4 组减 80，finalPrice=430
+        val products = (1..17).map { i ->
+            Product(id = i.toLong(), name = "P$i", originalPrice = 30.0)
+        }
+        val coupon = Coupon(
+            name = "满100减20",
+            type = CouponType.FULL_REDUCTION,
+            threshold = 100.0,
+            discountValue = 20.0,
+            isStackable = false
+        )
+
+        val solution = calculator.calculateBestCombination(products, listOf(coupon))
+
+        assertEquals(430.0, solution.finalPrice, 0.001)
+        assertEquals(4, solution.couponUsages.size)
+    }
+
+    @Test
+    fun greedyPathWithFairnessParamDoesNotCrash() {
+        // >16 件 + 公平策略：贪心路径接收 fairness 参数且不崩溃，结果不超过原价
+        val products = (1..17).map { i ->
+            Product(id = i.toLong(), name = "P$i", originalPrice = 30.0, ownerId = if (i <= 8) 1L else 2L)
+        }
+        val coupon = Coupon(
+            name = "满100减20",
+            type = CouponType.FULL_REDUCTION,
+            threshold = 100.0,
+            discountValue = 20.0,
+            isStackable = false
+        )
+
+        val solution = calculator.calculateBestCombination(
+            products, listOf(coupon), multiUserMode = true,
+            fairness = DiscountCalculator.FairnessStrategy.FAIR
+        )
+
+        assertTrue(solution.finalPrice <= 510.0)
+        assertTrue(solution.couponUsages.isNotEmpty())
+    }
 }

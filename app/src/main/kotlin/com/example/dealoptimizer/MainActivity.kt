@@ -26,6 +26,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Clear splash screen background before Compose renders
+        window.setBackgroundDrawable(null)
+
         setContent {
             DealOptimizerTheme {
                 Surface(modifier = androidx.compose.ui.Modifier.fillMaxSize()) {

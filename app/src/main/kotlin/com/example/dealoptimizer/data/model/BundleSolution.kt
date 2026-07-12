@@ -12,13 +12,8 @@ data class BundleSolution(
     fun getDiscountBreakdown(): String {
         val sb = StringBuilder()
         couponUsages.forEach { usage ->
-            val coupon = usage.coupon
-            val totalDiscount = when (coupon.type) {
-                CouponType.FULL_REDUCTION -> usage.count * coupon.discountValue
-                CouponType.DISCOUNT -> originalTotal * (coupon.discountValue / 100) * usage.count
-                CouponType.NO_THRESHOLD -> usage.count * coupon.discountValue
-            }
-            sb.append("${coupon.name} ×${usage.count}: -¥${"%.2f".format(totalDiscount)}\n")
+            val totalDiscount = usage.discount
+            sb.append("${usage.coupon.name} ×${usage.count}: -¥${"%.2f".format(totalDiscount)}\n")
         }
         return sb.toString()
     }
