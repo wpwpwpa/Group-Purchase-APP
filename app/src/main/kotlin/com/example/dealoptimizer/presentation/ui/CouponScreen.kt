@@ -1,5 +1,7 @@
 package com.example.dealoptimizer.presentation.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -13,6 +15,8 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -26,6 +30,7 @@ import com.example.dealoptimizer.presentation.viewmodel.CouponViewModel
 fun CouponScreen() {
     val viewModel: CouponViewModel = hiltViewModel()
     val coupons = viewModel.allCoupons.collectAsState(emptyList()).value
+    val isStackableMode by viewModel.isStackableMode.collectAsState()
     var showDialog by remember { mutableStateOf(false) }
     var editingCoupon by remember { mutableStateOf<Coupon?>(null) }
     var type by remember { mutableStateOf(CouponType.FULL_REDUCTION) }
@@ -35,6 +40,8 @@ fun CouponScreen() {
     var maxUsages by remember { mutableStateOf("") }
     var isStackable by remember { mutableStateOf(false) }
     var isSingleUse by remember { mutableStateOf(false) }
+
+    val filteredCoupons = coupons.filter { it.isStackable == isStackableMode }
 
     Scaffold(
         topBar = {
@@ -51,8 +58,8 @@ fun CouponScreen() {
                         purchasePrice = ""
                         discountValue = ""
                         maxUsages = ""
-                        isStackable = false
-                        isSingleUse = true
+                        isStackable = isStackableMode
+                        isSingleUse = !isStackableMode
                         showDialog = true
                     }) {
                         Icon(Icons.Default.Add, contentDescription = "添加优惠券")
@@ -61,42 +68,81 @@ fun CouponScreen() {
             )
         }
     ) { padding ->
-        if (coupons.isEmpty()) {
-            Box(
+        Column(
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
+        ) {
+            // 顶部两段式切换器：叠加券（默认在前）/ 单用券
+            Row(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.Center
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .background(AppSurface, RoundedCornerShape(8.dp))
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Text(text = "暂无优惠券，点击右上角添加", color = AppMuted)
+                SegmentedTab(
+                    text = "叠加券",
+                    selected = isStackableMode,
+                    onClick = { viewModel.setCouponMode(true) },
+                    modifier = Modifier.weight(1f)
+                )
+                SegmentedTab(
+                    text = "单用券",
+                    selected = !isStackableMode,
+                    onClick = { viewModel.setCouponMode(false) },
+                    modifier = Modifier.weight(1f)
+                )
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .padding(padding)
-                    .fillMaxSize(),
-                contentPadding = PaddingValues(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(coupons) { coupon ->
-                    CouponCard(
-                        coupon = coupon,
-                        onEdit = {
-                            editingCoupon = coupon
-                            type = CouponType.FULL_REDUCTION
-                            threshold = if (coupon.threshold == 0.0) "" else coupon.threshold.toString()
-                            purchasePrice = if (coupon.purchasePrice == 0.0) "" else coupon.purchasePrice.toString()
-                            discountValue = coupon.discountValue.toString()
-                            maxUsages = if (coupon.maxUsages == Int.MAX_VALUE) "" else coupon.maxUsages.toString()
-                            isStackable = coupon.isStackable
-                            isSingleUse = !coupon.isStackable
-                            showDialog = true
-                        },
-                        onEnabledChange = { enabled ->
-                            viewModel.updateCoupon(coupon.copy(isEnabled = enabled))
-                        },
-                        onDelete = { viewModel.deleteCoupon(coupon.id) }
-                    )
+
+            when {
+                coupons.isEmpty() -> {
+                    Box(
+                        modifier = Modifier.fillMaxSize().weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(text = "暂无优惠券，点击右上角添加", color = AppMuted)
+                    }
+                }
+                filteredCoupons.isEmpty() -> {
+                    Box(
+                        modifier = Modifier.fillMaxSize().weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (isStackableMode) "暂无叠加券，点击右上角添加" else "暂无单用券，点击右上角添加",
+                            color = AppMuted
+                        )
+                    }
+                }
+                else -> {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(filteredCoupons) { coupon ->
+                            CouponCard(
+                                coupon = coupon,
+                                onEdit = {
+                                    editingCoupon = coupon
+                                    type = CouponType.FULL_REDUCTION
+                                    threshold = if (coupon.threshold == 0.0) "" else coupon.threshold.toString()
+                                    purchasePrice = if (coupon.purchasePrice == 0.0) "" else coupon.purchasePrice.toString()
+                                    discountValue = coupon.discountValue.toString()
+                                    maxUsages = if (coupon.maxUsages == Int.MAX_VALUE) "" else coupon.maxUsages.toString()
+                                    isStackable = coupon.isStackable
+                                    isSingleUse = !coupon.isStackable
+                                    showDialog = true
+                                },
+                                onEnabledChange = { enabled ->
+                                    viewModel.updateCoupon(coupon.copy(isEnabled = enabled))
+                                },
+                                onDelete = { viewModel.deleteCoupon(coupon.id) }
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -340,5 +386,29 @@ fun CouponCard(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SegmentedTab(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (selected) MaterialTheme.colors.primary else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (selected) Color.White else AppMuted
+        )
     }
 }

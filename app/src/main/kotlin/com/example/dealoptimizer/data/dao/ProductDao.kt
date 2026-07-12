@@ -24,6 +24,9 @@ interface ProductDao {
     @Query("DELETE FROM products")
     suspend fun deleteAllProducts()
 
+    @Query("DELETE FROM products WHERE ownerId = :ownerId")
+    suspend fun deleteProductsByOwner(ownerId: Long)
+
     @Query("SELECT SUM(originalPrice) FROM products")
     suspend fun getTotalPrice(): Double?
 }

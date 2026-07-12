@@ -40,7 +40,8 @@ class DiscountCalculator {
         products: List<Product>,
         coupons: List<Coupon>,
         fillProducts: List<FillProduct> = emptyList(),
-        useFillProducts: Boolean = fillProducts.isNotEmpty()
+        useFillProducts: Boolean = fillProducts.isNotEmpty(),
+        multiUserMode: Boolean = false
     ): BundleSolution {
         val enabledCoupons = coupons.filter { it.isEnabled }
         if (products.isEmpty()) {
@@ -64,7 +65,7 @@ class DiscountCalculator {
             val solution = if (coupon.isStackable) {
                 calculateStackableSolution(products, coupon)
             } else {
-                calculateNonStackableSolution(products, coupon, fillProducts, useFillProducts)
+                calculateNonStackableSolution(products, coupon, fillProducts, useFillProducts, multiUserMode)
             }
             if (solution.finalPrice < bestSolution.finalPrice) {
                 bestSolution = solution
@@ -72,7 +73,7 @@ class DiscountCalculator {
         }
 
         if (enabledCoupons.size >= 2) {
-            val solution = calculateMultiCouponSolution(products, enabledCoupons, fillProducts, useFillProducts)
+            val solution = calculateMultiCouponSolution(products, enabledCoupons, fillProducts, useFillProducts, multiUserMode)
             if (solution.finalPrice < bestSolution.finalPrice) {
                 bestSolution = solution
             }
@@ -85,7 +86,8 @@ class DiscountCalculator {
         products: List<Product>,
         coupons: List<Coupon>,
         fillProducts: List<FillProduct>,
-        useFillProducts: Boolean
+        useFillProducts: Boolean,
+        multiUserMode: Boolean = false
     ): BundleSolution {
         val stackableCoupons = coupons.filter { it.isStackable }
         val nonStackableCoupons = coupons.filter { !it.isStackable }
@@ -103,9 +105,9 @@ class DiscountCalculator {
 
         if (nonStackableCoupons.isNotEmpty()) {
             val grouping = if (products.size <= 16) {
-                findBestExactGroups(products, nonStackableCoupons, fillProducts, useFillProducts)
+                findBestExactGroups(products, nonStackableCoupons, fillProducts, useFillProducts, multiUserMode)
             } else {
-                findGreedyGroups(products, nonStackableCoupons, fillProducts, useFillProducts)
+                findGreedyGroups(products, nonStackableCoupons, fillProducts, useFillProducts, multiUserMode)
             }
             usages.addAll(grouping.groups.map { group ->
                 CouponUsage(group.coupon, 1, group.products, group.fillProducts)
@@ -141,13 +143,14 @@ class DiscountCalculator {
         products: List<Product>,
         coupon: Coupon,
         fillProducts: List<FillProduct>,
-        useFillProducts: Boolean
+        useFillProducts: Boolean,
+        multiUserMode: Boolean = false
     ): BundleSolution {
         val originalTotal = products.totalPrice()
         val grouping = if (products.size <= 16) {
-            findBestExactGroups(products, listOf(coupon), fillProducts, useFillProducts)
+            findBestExactGroups(products, listOf(coupon), fillProducts, useFillProducts, multiUserMode)
         } else {
-            findGreedyGroups(products, listOf(coupon), fillProducts, useFillProducts)
+            findGreedyGroups(products, listOf(coupon), fillProducts, useFillProducts, multiUserMode)
         }
 
         val usages = grouping.groups.map { group ->
@@ -260,10 +263,11 @@ class DiscountCalculator {
         products: List<Product>,
         coupons: List<Coupon>,
         fillProducts: List<FillProduct>,
-        useFillProducts: Boolean
+        useFillProducts: Boolean,
+        multiUserMode: Boolean = false
     ): GroupingResult {
         val candidates = coupons.flatMapIndexed { index, coupon ->
-            buildCandidates(products, coupon, index, fillProducts, useFillProducts)
+            buildCandidates(products, coupon, index, fillProducts, useFillProducts, multiUserMode)
         }
         if (candidates.isEmpty()) return GroupingResult()
 
@@ -308,7 +312,8 @@ class DiscountCalculator {
         products: List<Product>,
         coupons: List<Coupon>,
         fillProducts: List<FillProduct>,
-        useFillProducts: Boolean
+        useFillProducts: Boolean,
+        multiUserMode: Boolean = false
     ): GroupingResult {
         val remaining = products.sortedBy { it.originalPrice }.toMutableList()
         val groups = mutableListOf<CouponCandidate>()
@@ -326,8 +331,15 @@ class DiscountCalculator {
             var groupTotal = 0.0
 
             while (remaining.isNotEmpty() && groupTotal < coupon.threshold) {
-                val next = remaining.removeAt(0)
-                group.add(next)
+                val next = remaining.first()
+                if (multiUserMode) {
+                    val ownersIfAdded = (group + next).groupBy { it.ownerId }
+                        .mapValues { (_, ps) -> ps.sumOf { it.originalPrice } }
+                    if (ownersIfAdded.size >= 2 && ownersIfAdded.values.any { it >= coupon.threshold }) {
+                        break
+                    }
+                }
+                group.add(remaining.removeAt(0))
                 groupTotal += next.originalPrice
             }
 
@@ -357,7 +369,8 @@ class DiscountCalculator {
         coupon: Coupon,
         couponIndex: Int,
         fillProducts: List<FillProduct>,
-        useFillProducts: Boolean
+        useFillProducts: Boolean,
+        multiUserMode: Boolean = false
     ): List<CouponCandidate> {
         val candidates = mutableListOf<CouponCandidate>()
         val fullMask = (1 shl products.size) - 1
@@ -370,6 +383,14 @@ class DiscountCalculator {
                 if (mask and (1 shl index) != 0) {
                     group.add(product)
                     productTotal += product.originalPrice
+                }
+            }
+
+            if (multiUserMode) {
+                val ownerTotals = group.groupBy { it.ownerId }
+                    .mapValues { (_, ps) -> ps.sumOf { it.originalPrice } }
+                if (ownerTotals.size >= 2 && ownerTotals.values.any { it >= coupon.threshold }) {
+                    continue
                 }
             }
 
