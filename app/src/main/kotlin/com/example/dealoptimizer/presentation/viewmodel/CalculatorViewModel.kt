@@ -67,6 +67,29 @@ class CalculatorViewModel @Inject constructor(
         _selectedProductIds.value = ids
     }
 
+    // ---- 多用户凑单方案对比：现状(两阶段) vs 全局(公平优先) ----
+    data class MultiUserSolution(
+        val key: String,
+        val title: String,
+        val combined: BundleSolution,
+        val shares: Map<Long, MergedShare>,
+        val perUser: Map<Long, BundleSolution>
+    )
+
+    private val _candidateOptions = MutableStateFlow<List<MultiUserSolution>>(emptyList())
+    val candidateOptions: StateFlow<List<MultiUserSolution>> = _candidateOptions
+
+    private val _selectedCandidateKey = MutableStateFlow<String?>(null)
+    val selectedCandidateKey: StateFlow<String?> = _selectedCandidateKey
+
+    /** 用户在「现状 / 全局」两种方案间手动切换应用 */
+    fun selectCandidate(key: String) {
+        val target = _candidateOptions.value.firstOrNull { it.key == key } ?: return
+        _selectedCandidateKey.value = key
+        _combinedSolution.value = target.combined
+        _shares.value = target.shares
+    }
+
     init {
         viewModelScope.launch(Dispatchers.IO) {
             productRepository.allProducts.collect { products ->
@@ -252,88 +275,134 @@ class CalculatorViewModel @Inject constructor(
                     )
                 }
             } else {
-                // ---- 单用券：先自组（perUser 锁定）+ 后凑单（crossPool）逐组聚合 ----
-                users.associate { u ->
-                    val baseOriginal = scoped.filter { it.ownerId == u.id }.sumOf { it.originalPrice }
-                    var userDiscount = 0.0
-                    var userPayable = 0.0
-                    var allocatedFillCost = 0.0
+                buildNonStackableShares(users, scoped, perUserLockedUsages, crossPool)
+            }
 
-                    // 阶段1：perUser 单人组（该用户已锁定的自组商品）
-                    val lockedUsages = perUserLockedUsages[u.id]
-                    if (lockedUsages != null) {
-                        for (usage in lockedUsages) {
-                            val groupProductTotal = usage.productGroup.sumOf { it.originalPrice }
-                            val fillTotal = usage.fillProducts.sumOf { it.price }
-                            val groupTotal = groupProductTotal + fillTotal
-                            val groupDiscount = when (usage.coupon.type) {
-                                CouponType.FULL_REDUCTION -> usage.count * usage.coupon.discountValue
-                                CouponType.DISCOUNT -> groupTotal * (usage.coupon.discountValue / 100) * usage.count
-                                CouponType.NO_THRESHOLD -> usage.count * usage.coupon.discountValue
-                            }
-                            // 单人组：全额享受优惠 + 承担全部凑单小物费用
-                            userDiscount += groupDiscount
-                            userPayable += groupProductTotal - groupDiscount + fillTotal
-                            allocatedFillCost += fillTotal
-                        }
+            // ===== 候选方案2：全局最优 + 公平优先 =====
+            // 所有勾选商品一起参与（multiUserMode=false 允许自组+跨组），仅在总省钱平局时
+            // 用公平 tie-break 让高价商品所属用户多留优惠，绝不牺牲总省钱。
+            val globalSolution = discountCalculator.calculateBestCombination(
+                scoped, enabledCoupons, fillProducts, useFillProducts,
+                multiUserMode = false,
+                fairness = DiscountCalculator.FairnessStrategy.FAIR
+            )
+            val globalShares = if (isStackable) shares else buildNonStackableShares(users, scoped, emptyMap(), globalSolution)
+
+            val statusQuo = MultiUserSolution(
+                key = "status_quo",
+                title = "现状（先自组后凑单）",
+                combined = combined,
+                shares = shares,
+                perUser = perUser
+            )
+            val globalFair = MultiUserSolution(
+                key = "global_fair",
+                title = "全局（公平优先）",
+                combined = globalSolution,
+                shares = globalShares,
+                perUser = perUser
+            )
+
+            val candidates = listOf(statusQuo, globalFair)
+            val selectedKey = _selectedCandidateKey.value ?: "status_quo"
+            val selected = candidates.firstOrNull { it.key == selectedKey } ?: statusQuo
+
+            _perUserSolutions.value = perUser
+            _combinedSolution.value = selected.combined
+            _shares.value = selected.shares
+            _incrementalDiscount.value = incrementalDiscount
+            _candidateOptions.value = candidates
+            _selectedCandidateKey.value = selected.key
+        }
+    }
+
+    /**
+     * 单用券分摊：先自组（perUserLockedUsages）+ 后凑单（crossPool）逐组聚合。
+     * 全局方案复用本函数时传 emptyMap() 作为 perUserLockedUsages、传 globalSolution 作为 crossPool，
+     * 此时所有分组（含自组单人或跨用户）统一按「原价占比」分摊，逻辑一致。
+     */
+    private fun buildNonStackableShares(
+        users: List<User>,
+        scoped: List<Product>,
+        perUserLockedUsages: Map<Long, List<CouponUsage>>,
+        crossPool: BundleSolution
+    ): Map<Long, MergedShare> {
+        val allGroupedProductIds = (perUserLockedUsages.values.flatten().flatMap { it.productGroup } +
+            crossPool.couponUsages.flatMap { it.productGroup }).map { it.id }.toSet()
+        return users.associate { u ->
+            val baseOriginal = scoped.filter { it.ownerId == u.id }.sumOf { it.originalPrice }
+            var userDiscount = 0.0
+            var userPayable = 0.0
+            var allocatedFillCost = 0.0
+
+            // 阶段1：perUser 单人组（该用户已锁定的自组商品）
+            val lockedUsages = perUserLockedUsages[u.id]
+            if (lockedUsages != null) {
+                for (usage in lockedUsages) {
+                    val groupProductTotal = usage.productGroup.sumOf { it.originalPrice }
+                    val fillTotal = usage.fillProducts.sumOf { it.price }
+                    val groupTotal = groupProductTotal + fillTotal
+                    val groupDiscount = when (usage.coupon.type) {
+                        CouponType.FULL_REDUCTION -> usage.count * usage.coupon.discountValue
+                        CouponType.DISCOUNT -> groupTotal * (usage.coupon.discountValue / 100) * usage.count
+                        CouponType.NO_THRESHOLD -> usage.count * usage.coupon.discountValue
                     }
-
-                    // 阶段2：跨用户凑单组（crossPool 中含该用户的组）
-                    for (usage in crossPool.couponUsages) {
-                        val userProducts = usage.productGroup.filter { it.ownerId == u.id }
-                        if (userProducts.isEmpty()) continue
-                        val ownerOriginal = userProducts.sumOf { it.originalPrice }
-                        val fillTotal = usage.fillProducts.sumOf { it.price }
-                        val groupProductTotal = usage.productGroup.sumOf { it.originalPrice }
-                        val groupTotal = groupProductTotal + fillTotal
-                        val groupDiscount = when (usage.coupon.type) {
-                            CouponType.FULL_REDUCTION -> usage.count * usage.coupon.discountValue
-                            CouponType.DISCOUNT -> groupTotal * (usage.coupon.discountValue / 100) * usage.count
-                            CouponType.NO_THRESHOLD -> usage.count * usage.coupon.discountValue
-                        }
-                        val ownersInGroup = usage.productGroup.map { it.ownerId }.distinct()
-
-                        if (ownersInGroup.size >= 2) {
-                            // 凑单组：按原价占比分摊优惠 + 凑单小物按原价占比分摊成本
-                            if (ownerOriginal > 0 || fillTotal > 0) {
-                                val w = if (groupProductTotal > 0) ownerOriginal / groupProductTotal else 0.0
-                                val myDiscount = groupDiscount * w
-                                val myFillCost = fillTotal * w
-                                userDiscount += myDiscount
-                                userPayable += ownerOriginal - myDiscount + myFillCost
-                                allocatedFillCost += myFillCost
-                            }
-                        } else if (userProducts.isNotEmpty() || ownersInGroup.size == 1) {
-                            // 跨用户池中的单人组（某人剩余商品恰好够自己达标）
-                            userDiscount += groupDiscount
-                            userPayable += ownerOriginal - groupDiscount + fillTotal
-                            allocatedFillCost += fillTotal
-                        } else if (fillTotal > 0 && ownersInGroup.isEmpty()) {
-                            val avgFill = fillTotal / users.size
-                            userPayable += avgFill
-                            allocatedFillCost += avgFill
-                        }
-                    }
-
-                    // 未达标商品（未进入任何组）：原价付
-                    val remainingOriginal = scoped
-                        .filter { it.ownerId == u.id && it.id !in allGroupedProductIds }
-                        .sumOf { it.originalPrice }
-                    userPayable += remainingOriginal
-
-                    u.id to MergedShare(
-                        ownOriginal = baseOriginal + allocatedFillCost,
-                        remaining = baseOriginal + allocatedFillCost - userDiscount,
-                        discount = userDiscount,
-                        payable = userPayable
-                    )
+                    // 单人组：全额享受优惠 + 承担全部凑单小物费用
+                    userDiscount += groupDiscount
+                    userPayable += groupProductTotal - groupDiscount + fillTotal
+                    allocatedFillCost += fillTotal
                 }
             }
 
-            _perUserSolutions.value = perUser
-            _combinedSolution.value = combined
-            _shares.value = shares
-            _incrementalDiscount.value = incrementalDiscount
+            // 阶段2：跨用户凑单组（crossPool 中含该用户的组）
+            for (usage in crossPool.couponUsages) {
+                val userProducts = usage.productGroup.filter { it.ownerId == u.id }
+                if (userProducts.isEmpty()) continue
+                val ownerOriginal = userProducts.sumOf { it.originalPrice }
+                val fillTotal = usage.fillProducts.sumOf { it.price }
+                val groupProductTotal = usage.productGroup.sumOf { it.originalPrice }
+                val groupTotal = groupProductTotal + fillTotal
+                val groupDiscount = when (usage.coupon.type) {
+                    CouponType.FULL_REDUCTION -> usage.count * usage.coupon.discountValue
+                    CouponType.DISCOUNT -> groupTotal * (usage.coupon.discountValue / 100) * usage.count
+                    CouponType.NO_THRESHOLD -> usage.count * usage.coupon.discountValue
+                }
+                val ownersInGroup = usage.productGroup.map { it.ownerId }.distinct()
+
+                if (ownersInGroup.size >= 2) {
+                    // 凑单组：按原价占比分摊优惠 + 凑单小物按原价占比分摊成本
+                    if (ownerOriginal > 0 || fillTotal > 0) {
+                        val w = if (groupProductTotal > 0) ownerOriginal / groupProductTotal else 0.0
+                        val myDiscount = groupDiscount * w
+                        val myFillCost = fillTotal * w
+                        userDiscount += myDiscount
+                        userPayable += ownerOriginal - myDiscount + myFillCost
+                        allocatedFillCost += myFillCost
+                    }
+                } else if (userProducts.isNotEmpty() || ownersInGroup.size == 1) {
+                    // 跨用户池中的单人组（某人剩余商品恰好够自己达标）
+                    userDiscount += groupDiscount
+                    userPayable += ownerOriginal - groupDiscount + fillTotal
+                    allocatedFillCost += fillTotal
+                } else if (fillTotal > 0 && ownersInGroup.isEmpty()) {
+                    val avgFill = fillTotal / users.size
+                    userPayable += avgFill
+                    allocatedFillCost += avgFill
+                }
+            }
+
+            // 未达标商品（未进入任何组）：原价付
+            val remainingOriginal = scoped
+                .filter { it.ownerId == u.id && it.id !in allGroupedProductIds }
+                .sumOf { it.originalPrice }
+            userPayable += remainingOriginal
+
+            u.id to MergedShare(
+                ownOriginal = baseOriginal + allocatedFillCost,
+                remaining = baseOriginal + allocatedFillCost - userDiscount,
+                discount = userDiscount,
+                payable = userPayable
+            )
         }
     }
 }

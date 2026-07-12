@@ -4,6 +4,7 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -72,6 +73,8 @@ fun CalculatorScreen() {
     val shares = viewModel.shares.collectAsState().value
     val incrementalDiscount = viewModel.incrementalDiscount.collectAsState().value
     val perUserSolutions = viewModel.perUserSolutions.collectAsState().value
+    val candidateOptions = viewModel.candidateOptions.collectAsState().value
+    val selectedCandidateKey = viewModel.selectedCandidateKey.collectAsState().value
     val couponMode = viewModel.couponMode.collectAsState().value
     val modeCoupons = allCoupons.filter { it.isEnabled && it.isStackable == couponMode }
     val vmSelectedIds = viewModel.selectedProductIds.collectAsState().value
@@ -207,6 +210,18 @@ fun CalculatorScreen() {
                                     else selectedProductIds - optionalIds
                                 )
                             }
+                        )
+                    }
+                }
+
+                // 多用户方案对比：现状 vs 全局，二选一应用
+                if (checkedUsers.isNotEmpty() && candidateOptions.size >= 2) {
+                    item {
+                        CandidateCompareCard(
+                            candidates = candidateOptions,
+                            selectedKey = selectedCandidateKey,
+                            users = checkedUsers,
+                            onSelect = { viewModel.selectCandidate(it) }
                         )
                     }
                 }
@@ -358,6 +373,68 @@ fun CalculatorScreen() {
                             )
                         }
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CandidateCompareCard(
+    candidates: List<CalculatorViewModel.MultiUserSolution>,
+    selectedKey: String?,
+    users: List<User>,
+    onSelect: (String) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "多用户凑单方案",
+            fontWeight = FontWeight.Bold,
+            fontSize = 15.sp,
+            modifier = Modifier.padding(bottom = 6.dp)
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            candidates.forEach { c ->
+                val selected = c.key == selectedKey
+                Card(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onSelect(c.key) },
+                    shape = RoundedCornerShape(10.dp),
+                    elevation = 1.dp,
+                    border = if (selected) BorderStroke(1.5.dp, AppSecondaryBlue) else null,
+                    backgroundColor = if (selected) Color(0xFFEAF3FF) else MaterialTheme.colors.surface
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Text(text = c.title, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = AppInk)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "应付 ¥${"%.2f".format(c.combined.finalPrice)}",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (selected) AppSecondaryBlue else AppInk
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        users.forEach { u ->
+                            val s = c.shares[u.id]
+                            if (s != null) {
+                                Text(
+                                    text = "${u.nickname} ¥${"%.2f".format(s.payable)}",
+                                    fontSize = 12.sp,
+                                    color = AppMuted
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = if (selected) "已选用" else "点击选用",
+                            fontSize = 11.sp,
+                            color = if (selected) AppSecondaryBlue else AppMuted
+                        )
+                    }
+                }
             }
         }
     }
