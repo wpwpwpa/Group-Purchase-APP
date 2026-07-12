@@ -62,6 +62,14 @@ private data class CalculationInputSignature(
     val useFillProducts: Boolean
 )
 
+private data class MultiUserInputSignature(
+    val products: List<Product>,
+    val coupons: List<Coupon>,
+    val selectedIds: Set<Long>,
+    val checkedUserIds: Set<Long>,
+    val useFillProducts: Boolean
+)
+
 @Composable
 fun CalculatorScreen() {
     val viewModel: CalculatorViewModel = hiltViewModel()
@@ -80,6 +88,7 @@ fun CalculatorScreen() {
     val modeCoupons = allCoupons.filter { it.isEnabled && it.isStackable == couponMode }
     val vmSelectedIds = viewModel.selectedProductIds.collectAsState().value
     var lastCalculationInput by remember { mutableStateOf<CalculationInputSignature?>(null) }
+    var lastMultiUserInput by remember { mutableStateOf<MultiUserInputSignature?>(null) }
     var useFillProducts by remember { mutableStateOf(false) }
     val selectedProductIds = vmSelectedIds
     val selectedProducts = allProducts.filter { it.id in selectedProductIds || it.isRequired }
@@ -94,7 +103,9 @@ fun CalculatorScreen() {
         }
     }
 
-    LaunchedEffect(selectedProductIds, allProducts, allCoupons, useFillProducts) {
+    // 单用户场景（无勾选用户）：仅计算单用户方案，避免与多用户计算重复
+    LaunchedEffect(selectedProductIds, allProducts, allCoupons, useFillProducts, checkedUsers) {
+        if (checkedUsers.isNotEmpty()) return@LaunchedEffect
         val calculationInput = CalculationInputSignature(
             products = allProducts,
             coupons = allCoupons,
@@ -113,7 +124,20 @@ fun CalculatorScreen() {
         }
     }
 
-    LaunchedEffect(selectedProductIds, allProducts, allCoupons, useFillProducts) {
+    // 多用户场景（有勾选用户）：仅计算多用户方案
+    LaunchedEffect(selectedProductIds, allProducts, allCoupons, useFillProducts, checkedUsers) {
+        if (checkedUsers.isEmpty()) return@LaunchedEffect
+        val multiUserInput = MultiUserInputSignature(
+            products = allProducts,
+            coupons = allCoupons,
+            selectedIds = selectedProductIds,
+            checkedUserIds = checkedUsers.map { it.id }.toSet(),
+            useFillProducts = useFillProducts
+        )
+        if (multiUserInput == lastMultiUserInput) {
+            return@LaunchedEffect
+        }
+        lastMultiUserInput = multiUserInput
         viewModel.calculateMultiUser(useFillProducts)
     }
 

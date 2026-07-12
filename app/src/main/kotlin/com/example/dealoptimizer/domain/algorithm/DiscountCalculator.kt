@@ -2,6 +2,7 @@ package com.example.dealoptimizer.domain.algorithm
 
 import com.example.dealoptimizer.data.model.*
 import kotlin.math.min
+import kotlin.comparisons.maxOf
 
 class DiscountCalculator {
     private companion object {
@@ -390,27 +391,25 @@ class DiscountCalculator {
         multiUserMode: Boolean = false
     ): List<CouponCandidate> {
         val candidates = mutableListOf<CouponCandidate>()
-        val fullMask = (1 shl products.size) - 1
+        val n = products.size
+        if (n == 0) return candidates
 
-        for (mask in 1..fullMask) {
-            val group = mutableListOf<Product>()
-            var productTotal = 0.0
+        // 后缀和：suffixSum[i] = sum(products[i..n-1].price)，用于限界剪枝
+        val suffixSum = DoubleArray(n + 1)
+        for (i in (n - 1) downTo 0) {
+            suffixSum[i] = suffixSum[i + 1] + products[i].originalPrice
+        }
+        // 启用 fill 时单组最多靠 fill 补足 MAX_AUTO_FILL_GAP，故可达下限为 threshold - MAX_AUTO_FILL_GAP
+        val lowerBound = if (useFillProducts) maxOf(coupon.threshold - MAX_AUTO_FILL_GAP, 0.0) else coupon.threshold
 
-            products.forEachIndexed { index, product ->
-                if (mask and (1 shl index) != 0) {
-                    group.add(product)
-                    productTotal += product.originalPrice
-                }
-            }
-
+        fun addIfValid(group: List<Product>, mask: Int) {
+            if (group.isEmpty()) return
+            val productTotal = group.sumOf { it.originalPrice }
             if (multiUserMode) {
                 val ownerTotals = group.groupBy { it.ownerId }
                     .mapValues { (_, ps) -> ps.sumOf { it.originalPrice } }
-                if (ownerTotals.size >= 2 && ownerTotals.values.any { it >= coupon.threshold }) {
-                    continue
-                }
+                if (ownerTotals.size >= 2 && ownerTotals.values.any { it >= coupon.threshold }) return
             }
-
             if (productTotal >= coupon.threshold) {
                 val discount = calculateSingleUseDiscount(productTotal, coupon)
                 if (discount > 0.0) {
@@ -431,6 +430,28 @@ class DiscountCalculator {
             }
         }
 
+        // 带限界剪枝的回溯：只生成「可能达标（或能 fill 达标）」的子集，跳过绝对凑不够的分支。
+        // 不重排 products 顺序，mask 仍对应原始 index，保证与 solve 的 availableMask 一致。
+        // 限界仅在 sum + 后续所有商品价 < 下限（即便加 fill 也凑不够）时剪枝，绝不丢弃可达标子集 → 候选集合与原暴力枚举完全一致。
+        fun dfs(i: Int, sum: Double, group: MutableList<Product>, mask: Int) {
+            if (i == n) {
+                addIfValid(group.toList(), mask)
+                return
+            }
+            // 包含 products[i]
+            group.add(products[i])
+            dfs(i + 1, sum + products[i].originalPrice, group, mask or (1 shl i))
+            group.removeAt(group.lastIndex)
+            // 不包含 products[i]：若当前 sum 加后续所有商品价都凑不到下限，则该分支无任何达标超集，剪枝
+            if (sum + suffixSum[i + 1] >= lowerBound) {
+                dfs(i + 1, sum, group, mask)
+            }
+        }
+
+        dfs(0, 0.0, mutableListOf(), 0)
+
+        // 保序：先按 mask 升序（与原枚举顺序一致），再按 netSavings 降序稳定排序，保证平局时 solve 的选择与原行为逐字节一致
+        candidates.sortBy { it.mask }
         return candidates.sortedWith(
             compareByDescending<CouponCandidate> { it.netSavings }
                 .thenBy { it.fillTotal }

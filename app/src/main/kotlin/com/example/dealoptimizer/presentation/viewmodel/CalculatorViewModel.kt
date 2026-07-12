@@ -90,6 +90,22 @@ class CalculatorViewModel @Inject constructor(
         _shares.value = target.shares
     }
 
+    // 计算结果缓存：输入签名未变时跳过重复计算（跨页面切换有效，ViewModel 在导航期间存活）
+    private data class SingleCalcKey(
+        val products: List<Product>,
+        val coupons: List<Coupon>,
+        val useFill: Boolean
+    )
+    private data class MultiUserCalcKey(
+        val products: List<Product>,
+        val coupons: List<Coupon>,
+        val users: List<User>,
+        val selectedIds: Set<Long>,
+        val useFill: Boolean
+    )
+    private var lastSingleKey: SingleCalcKey? = null
+    private var lastMultiUserKey: MultiUserCalcKey? = null
+
     init {
         viewModelScope.launch(Dispatchers.IO) {
             productRepository.allProducts.collect { products ->
@@ -146,6 +162,12 @@ class CalculatorViewModel @Inject constructor(
             // 混合场景（两类券同时参与）算法层 DiscountCalculator 已支持，
             // 如需启用，去掉下方 isStackable 过滤即可。
             val enabledCoupons = coupons.filter { it.isEnabled && it.isStackable == couponModeRepository.isStackableMode.value }
+            // 输入签名未变且已有结果：直接复用，避免切页/重组导致的重复重算
+            val key = SingleCalcKey(selectedProducts, enabledCoupons, useFillProducts)
+            if (key == lastSingleKey && _solution.value != null) {
+                return@launch
+            }
+            lastSingleKey = key
             val fillProducts = if (useFillProducts) fillProductRepository.allFillProducts.first() else emptyList()
 
             if (selectedProducts.isEmpty() || enabledCoupons.isEmpty()) {
@@ -171,6 +193,13 @@ class CalculatorViewModel @Inject constructor(
             val fillProducts = if (useFillProducts) fillProductRepository.allFillProducts.first() else emptyList()
             val users = userRepository.allUsers.first().filter { it.isSelected }
             val selectedIds = _selectedProductIds.value
+
+            // 输入签名未变且已有结果：直接复用，避免切页/重组导致的重复重算（跨页面有效）
+            val key = MultiUserCalcKey(allProducts, enabledCoupons, users, selectedIds, useFillProducts)
+            if (key == lastMultiUserKey && _combinedSolution.value != null) {
+                return@launch
+            }
+            lastMultiUserKey = key
 
             // 仅保留勾选商品（必买商品始终保留）
             val scoped = allProducts.filter { p ->
@@ -226,8 +255,6 @@ class CalculatorViewModel @Inject constructor(
 
             // 合并解（供 UI 展示）：perUser 单人组 + 跨用户凑单组 + 未达标商品
             val mergedUsages = perUserLockedUsages.values.flatten() + crossPool.couponUsages
-            val allGroupedProductIds = (perUserLockedUsages.values.flatMap { usages -> usages.flatMap { it.productGroup }} +
-                crossPool.couponUsages.flatMap { it.productGroup }).map { it.id }.toSet()
             val combined = BundleSolution(
                 products = scoped,
                 couponUsages = mergedUsages,
