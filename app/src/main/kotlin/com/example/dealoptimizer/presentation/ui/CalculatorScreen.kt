@@ -599,24 +599,9 @@ private fun ProductSelectionItem(
     }
 }
 
-private fun Product.thresholdGapColor(coupons: List<Coupon>): Color {
-    val nearestGap = coupons
-        .asSequence()
-        .filter { it.isEnabled && it.type == CouponType.FULL_REDUCTION && it.threshold > originalPrice }
-        .map { it.threshold - originalPrice }
-        .minOrNull()
-
-    return when {
-        nearestGap == null -> AppInk
-        nearestGap <= 20.0 -> AppAmber
-        nearestGap <= 40.0 -> AppGreen
-        else -> AppInk
-    }
-}
-
-// 必买商品强制红（优先级最高），否则用门槛橙绿
-private fun Product.displayColor(coupons: List<Coupon>): Color =
-    if (isRequired) AppRed else thresholdGapColor(coupons)
+// 必买商品强制红（优先级最高），否则默认黑色
+private fun Product.displayColor(_coupons: List<Coupon>): Color =
+    if (isRequired) AppRed else AppInk
 
 // 叠加券模式下，实付款距最近门槛（或其倍数）差距：≤20 红、≤40 黄
 private fun priceGapColor(finalPrice: Double, coupons: List<Coupon>): Color {

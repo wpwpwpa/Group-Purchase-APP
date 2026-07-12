@@ -5,6 +5,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -22,7 +24,9 @@ fun UserProductSection(
     user: User,
     products: List<Product>,
     onClear: () -> Unit,
-    onEdit: (Product) -> Unit
+    onEdit: (Product) -> Unit,
+    onToggleRequired: (Product) -> Unit,
+    onDelete: (Product) -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -55,24 +59,35 @@ fun UserProductSection(
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
             } else {
-                BoxWithConstraints {
-                    val gap = 8.dp
-                    val colCount = maxOf(
-                        1,
-                        ((maxWidth - gap) / (CardMinWidth + gap)).toInt()
-                    )
-                    val typeItems = clothingOptions.map { type ->
-                        type to products.filter { resolveType(it) == type }
-                    }.filter { it.second.isNotEmpty() }
-                    val unmatched = products.filter { resolveType(it) == "" }
+                val gap = 8.dp
+                val colCount = 2
+                // 按四大类型分组，保持顺序：上半身→下半身→全身→饰品
+                val categoryOrder = listOf("上半身", "下半身", "全身", "饰品")
+                val categoryItems = categoryOrder.map { cat ->
+                    cat to products.filter { resolveCategory(it) == cat }
+                }.filter { it.second.isNotEmpty() }
+                val unmatched = products.filter { resolveCategory(it) == "" }
 
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        typeItems.forEach { (_, items) ->
-                            TypeBlock(items = items, colCount = colCount, gap = gap, onEdit = onEdit)
-                        }
-                        if (unmatched.isNotEmpty()) {
-                            TypeBlock(items = unmatched, colCount = colCount, gap = gap, onEdit = onEdit)
-                        }
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    categoryItems.forEach { (_, items) ->
+                        TypeBlock(
+                            items = items,
+                            colCount = colCount,
+                            gap = gap,
+                            onEdit = onEdit,
+                            onToggleRequired = onToggleRequired,
+                            onDelete = onDelete
+                        )
+                    }
+                    if (unmatched.isNotEmpty()) {
+                        TypeBlock(
+                            items = unmatched,
+                            colCount = colCount,
+                            gap = gap,
+                            onEdit = onEdit,
+                            onToggleRequired = onToggleRequired,
+                            onDelete = onDelete
+                        )
                     }
                 }
             }
@@ -85,7 +100,9 @@ private fun TypeBlock(
     items: List<Product>,
     colCount: Int,
     gap: androidx.compose.ui.unit.Dp,
-    onEdit: (Product) -> Unit
+    onEdit: (Product) -> Unit,
+    onToggleRequired: (Product) -> Unit,
+    onDelete: (Product) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(gap)) {
         items.chunked(colCount).forEach { row ->
@@ -94,6 +111,8 @@ private fun TypeBlock(
                     ProductMiniCard(
                         product = product,
                         onClick = { onEdit(product) },
+                        onToggleRequired = { onToggleRequired(product) },
+                        onDelete = { onDelete(product) },
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -105,39 +124,93 @@ private fun TypeBlock(
     }
 }
 
-private fun resolveType(product: Product): String {
+/** 四大类分类：根据商品名（去掉颜色前缀）匹配所属类别 */
+private fun resolveCategory(product: Product): String {
     val base = product.name.removePrefix(product.color)
-    return clothingOptions.firstOrNull { base.startsWith(it) } ?: ""
+    return when {
+        upperClothingOptions.any { base.startsWith(it) } -> "上半身"
+        lowerClothingOptions.any { base.startsWith(it) } -> "下半身"
+        wholeBodyOptions.any { base.startsWith(it) } -> "全身"
+        accessoryOptions.any { base.startsWith(it) } -> "饰品"
+        else -> ""
+    }
 }
 
+/** 类型背景色（方案A 马卡龙浅色），未匹配项走空 */
+private val categoryBackground = mapOf(
+    "上半身" to Color(0xFFE0F2FE),
+    "下半身" to Color(0xFFDCFCE7),
+    "全身" to Color(0xFFFEF9C3),
+    "饰品" to Color(0xFFF3E8FF)
+)
+
+/** 类型边框色（同色系稍深一档） */
+private val categoryBorder = mapOf(
+    "上半身" to Color(0xFFBAE6FD),
+    "下半身" to Color(0xFFBBF7D0),
+    "全身" to Color(0xFFFEF08A),
+    "饰品" to Color(0xFFE9D5FF)
+)
+
 @Composable
-fun ProductMiniCard(product: Product, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun ProductMiniCard(
+    product: Product,
+    onClick: () -> Unit,
+    onToggleRequired: () -> Unit,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     val required = product.isRequired
+    val category = resolveCategory(product)
+    val bgColor = categoryBackground[category] ?: MaterialTheme.colors.surface
+    val borderColor = categoryBorder[category] ?: AppLine
     Card(
         modifier = modifier
-            .height(84.dp)
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(8.dp),
         elevation = 1.dp,
-        border = if (required) BorderStroke(1.5.dp, Color(0xFFE24B4A)) else null,
-        backgroundColor = if (required) Color(0xFFFEE2E2) else MaterialTheme.colors.surface
+        border = if (required) BorderStroke(1.5.dp, Color(0xFFE24B4A)) else BorderStroke(1.dp, borderColor),
+        backgroundColor = if (required) Color(0xFFFEE2E2) else bgColor
     ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.Center
+        Row(
+            modifier = Modifier.padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = product.name,
-                fontWeight = FontWeight.Bold,
-                fontSize = 15.sp,
-                maxLines = 1
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "¥${"%.2f".format(product.originalPrice)}",
-                color = AppMuted,
-                fontSize = 13.sp
-            )
+            // 左侧：名称 + 价格
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
+                Text(
+                    text = product.name,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    maxLines = 1
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "\u00A5${"%.2f".format(product.originalPrice)}",
+                    color = AppMuted,
+                    fontSize = 12.sp
+                )
+            }
+            // 右侧：必买 Switch + 删除图标
+            Column(horizontalAlignment = Alignment.End) {
+                Switch(
+                    checked = required,
+                    onCheckedChange = { onToggleRequired() },
+                    modifier = Modifier.height(28.dp)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "删除",
+                        tint = MaterialTheme.colors.error,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
         }
     }
 }

@@ -36,10 +36,10 @@ import kotlinx.coroutines.launch
 import com.example.dealoptimizer.presentation.viewmodel.ProductViewModel
 import kotlin.math.roundToInt
 
-private val upperClothingOptions = listOf("短袖", "长袖", "吊带", "外套", "衬衫", "羽绒服", "内衣")
-private val lowerClothingOptions = listOf("长裤", "短裤", "半身裙", "内裤")
-private val wholeBodyOptions = listOf("连衣裙", "背带裤")
-private val accessoryOptions = listOf("包包", "饰品", "围巾", "帽子", "眼镜", "丝巾", "皮带")
+internal val upperClothingOptions = listOf("短袖", "长袖", "吊带", "外套", "衬衫", "羽绒服", "内衣")
+internal val lowerClothingOptions = listOf("长裤", "短裤", "半身裙", "内裤")
+internal val wholeBodyOptions = listOf("连衣裙", "背带裤")
+internal val accessoryOptions = listOf("包包", "饰品", "围巾", "帽子", "眼镜", "丝巾", "皮带")
 internal val clothingOptions = upperClothingOptions + lowerClothingOptions + wholeBodyOptions + accessoryOptions
 private val presetColors = listOf("白", "黑", "红", "蓝", "粉", "黄", "绿", "灰")
 
@@ -174,7 +174,11 @@ fun ProductScreen() {
                                         isRequired = p.isRequired
                                         selectedOwnerId = p.ownerId
                                         showDialog = true
-                                    }
+                                    },
+                                    onToggleRequired = { p ->
+                                        viewModel.updateProduct(p.copy(isRequired = !p.isRequired))
+                                    },
+                                    onDelete = { p -> viewModel.deleteProduct(p.id) }
                                 )
                             }
                         }
