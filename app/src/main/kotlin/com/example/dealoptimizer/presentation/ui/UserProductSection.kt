@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,7 +37,8 @@ fun UserProductSection(
     onClear: () -> Unit,
     onEdit: (Product) -> Unit,
     onToggleRequired: (Product) -> Unit,
-    onDelete: (Product) -> Unit
+    onDelete: (Product) -> Unit,
+    onAdd: (User) -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -70,7 +72,7 @@ fun UserProductSection(
                 )
             } else {
                 val gap = 8.dp
-                val colCount = 3
+                val colCount = 1
                 // 按四大类型分组，保持顺序：上半身→下半身→全身→饰品
                 val categoryOrder = listOf("上半身", "下半身", "全身", "饰品")
                 val categoryItems = categoryOrder.map { cat ->
@@ -105,6 +107,8 @@ fun UserProductSection(
                     }
                 }
             }
+            Spacer(modifier = Modifier.height(8.dp))
+            AddProductBar(onClick = { onAdd(user) })
         }
     }
 }
@@ -245,15 +249,20 @@ fun ProductMiniCard(
                 modifier = Modifier.padding(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
                     Text(
                         text = product.name,
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
-                    Spacer(modifier = Modifier.height(2.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
                     Text(
                         text = "¥${"%.2f".format(product.originalPrice)}",
                         color = AppMuted,
@@ -267,6 +276,37 @@ fun ProductMiniCard(
                     modifier = Modifier.size(24.dp)
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun AddProductBar(onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colors.surface,
+        border = BorderStroke(1.dp, AppLine)
+    ) {
+        Row(
+            modifier = Modifier.padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = "添加商品",
+                tint = MaterialTheme.colors.primary
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = "添加商品",
+                color = MaterialTheme.colors.primary,
+                fontWeight = FontWeight.Medium,
+                fontSize = 14.sp
+            )
         }
     }
 }

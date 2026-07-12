@@ -62,13 +62,13 @@ fun ProductScreen() {
     var selectedColor by remember { mutableStateOf("") }
     var openProductId by remember { mutableStateOf<Long?>(null) }
 
-    fun startAdd() {
+    fun startAdd(ownerId: Long? = null) {
         editingProduct = null
         selectedName = clothingOptions.first()
         selectedColor = ""
         priceDigits = listOf(0, 0, 9, 9)
         isRequired = false
-        selectedOwnerId = users.firstOrNull { it.isDefault }?.id ?: 1L
+        selectedOwnerId = ownerId ?: users.firstOrNull { it.isDefault }?.id ?: 1L
         showDialog = true
     }
 
@@ -201,7 +201,8 @@ fun ProductScreen() {
                                     onToggleRequired = { p ->
                                         viewModel.updateProduct(p.copy(isRequired = !p.isRequired))
                                     },
-                                    onDelete = { p -> viewModel.deleteProduct(p.id) }
+                                    onDelete = { p -> viewModel.deleteProduct(p.id) },
+                                    onAdd = { startAdd(it.id) }
                                 )
                             }
                         }
