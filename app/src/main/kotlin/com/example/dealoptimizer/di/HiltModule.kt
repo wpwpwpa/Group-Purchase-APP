@@ -26,7 +26,6 @@ object HiltModule {
             AppDatabase::class.java,
             "deal_optimizer_db"
         )
-            .allowMainThreadQueries()
             .addMigrations(AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7)
             .addCallback(object : RoomDatabase.Callback() {
                 override fun onCreate(db: SupportSQLiteDatabase) {
@@ -37,7 +36,6 @@ object HiltModule {
                     db.execSQL("INSERT INTO sqlite_sequence (name, seq) VALUES ('users', 1)")
                 }
             })
-            .fallbackToDestructiveMigration()
             .build()
     }
 

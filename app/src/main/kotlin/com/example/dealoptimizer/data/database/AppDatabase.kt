@@ -16,7 +16,7 @@ import com.example.dealoptimizer.data.model.User
 @Database(
     entities = [Product::class, Coupon::class, FillProduct::class, User::class],
     version = 7,
-    exportSchema = false
+    exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun productDao(): ProductDao
