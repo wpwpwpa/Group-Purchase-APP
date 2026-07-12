@@ -13,8 +13,9 @@ android {
         applicationId "com.example.dealoptimizer"
         minSdk 24
         targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        def buildStamp = (System.currentTimeMillis().intdiv(60000)) as int
+        versionCode = buildStamp
+        versionName = "1.0.debug.${buildStamp}"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
