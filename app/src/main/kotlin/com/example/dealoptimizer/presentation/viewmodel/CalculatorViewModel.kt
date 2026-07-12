@@ -63,8 +63,16 @@ class CalculatorViewModel @Inject constructor(
     private val _selectedProductIds = MutableStateFlow<Set<Long>>(emptySet())
     val selectedProductIds: StateFlow<Set<Long>> = _selectedProductIds
 
+    // 计算异常（DB 读取 / 算法异常）暴露给 UI，避免协程静默失败导致界面无反馈
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error
+
     fun updateSelectedProductIds(ids: Set<Long>) {
         _selectedProductIds.value = ids
+    }
+
+    fun clearError() {
+        _error.value = null
     }
 
     // ---- 多用户凑单方案对比：现状(两阶段) vs 全局(公平优先) ----
@@ -131,6 +139,7 @@ class CalculatorViewModel @Inject constructor(
 
     fun calculateBestPrice(useFillProducts: Boolean = false) {
         viewModelScope.launch(Dispatchers.IO) {
+            try {
             val products = productRepository.allProducts.first()
             val coupons = couponRepository.allCoupons.first()
             // 当前仅使用单一模式券（叠加或单用）。
@@ -152,11 +161,15 @@ class CalculatorViewModel @Inject constructor(
 
             val comparison = discountCalculator.calculateComparisonResult(products, enabledCoupons, fillProducts, useFillProducts)
             _comparisonResult.value = comparison
+            } catch (e: Exception) {
+                _error.value = e.message ?: "计算失败"
+            }
         }
     }
 
     fun calculateForProducts(selectedProducts: List<Product>, useFillProducts: Boolean = false) {
         viewModelScope.launch(Dispatchers.IO) {
+            try {
             val coupons = _allCoupons.value.ifEmpty { couponRepository.allCoupons.first() }
             // 当前仅使用单一模式券（叠加或单用）。
             // 混合场景（两类券同时参与）算法层 DiscountCalculator 已支持，
@@ -178,12 +191,16 @@ class CalculatorViewModel @Inject constructor(
 
             _solution.value = discountCalculator.calculateBestCombination(selectedProducts, enabledCoupons, fillProducts, useFillProducts)
             _comparisonResult.value = discountCalculator.calculateComparisonResult(selectedProducts, enabledCoupons, fillProducts, useFillProducts)
+            } catch (e: Exception) {
+                _error.value = e.message ?: "计算失败"
+            }
         }
     }
 
     // 多用户：每人单独算 + 合并跨用户算 + 按原价占比分摊（仅用勾选商品）
     fun calculateMultiUser(useFillProducts: Boolean = false) {
         viewModelScope.launch(Dispatchers.IO) {
+            try {
             val allProducts = productRepository.allProducts.first()
             val coupons = couponRepository.allCoupons.first()
             // 当前仅使用单一模式券（叠加或单用）。
@@ -266,13 +283,7 @@ class CalculatorViewModel @Inject constructor(
                     products = scoped,
                     couponUsages = mergedUsages,
                     originalTotal = scoped.sumOf { it.originalPrice },
-                    finalPrice = mergedUsages.sumOf { usage ->
-                        when (usage.coupon.type) {
-                            CouponType.FULL_REDUCTION -> usage.count * usage.coupon.discountValue
-                            CouponType.DISCOUNT -> usage.productGroup.sumOf { it.originalPrice } * (usage.coupon.discountValue / 100) * usage.count
-                            CouponType.NO_THRESHOLD -> usage.count * usage.coupon.discountValue
-                        }
-                    }.let { totalDiscount -> scoped.sumOf { it.originalPrice } - totalDiscount },
+                    finalPrice = scoped.sumOf { it.originalPrice } - mergedUsages.sumOf { usage -> usageDiscount(usage, includeFill = false) },
                     fillProducts = (perUser.values.flatMap { it.fillProducts } + crossPool.fillProducts).distinctBy { it.name }
                 )
             }
@@ -348,6 +359,28 @@ class CalculatorViewModel @Inject constructor(
             _incrementalDiscount.value = incrementalDiscount
             _candidateOptions.value = candidates
             _selectedCandidateKey.value = selected.key
+            } catch (e: Exception) {
+                _error.value = e.message ?: "计算失败"
+            }
+        }
+    }
+
+    /**
+     * 单条用券折扣的统一算法（与 DiscountCalculator 的折扣口径一致，单一真相源）。
+     * ViewModel 内分摊/合并多处需要单条用券折扣，集中此处避免手抄公式分叉。
+     * includeFill=true 时 DISCOUNT 类型以「商品原价 + 凑单小物」为基数（分摊场景），
+     * false 时仅用商品原价（合并方案 finalPrice 场景）。
+     */
+    private fun usageDiscount(usage: CouponUsage, includeFill: Boolean): Double {
+        val groupTotal = if (includeFill) {
+            usage.productGroup.sumOf { it.originalPrice } + usage.fillProducts.sumOf { it.price }
+        } else {
+            usage.productGroup.sumOf { it.originalPrice }
+        }
+        return when (usage.coupon.type) {
+            CouponType.FULL_REDUCTION -> usage.count * usage.coupon.discountValue
+            CouponType.DISCOUNT -> groupTotal * (usage.coupon.discountValue / 100) * usage.count
+            CouponType.NO_THRESHOLD -> usage.count * usage.coupon.discountValue
         }
     }
 
@@ -376,12 +409,7 @@ class CalculatorViewModel @Inject constructor(
                 for (usage in lockedUsages) {
                     val groupProductTotal = usage.productGroup.sumOf { it.originalPrice }
                     val fillTotal = usage.fillProducts.sumOf { it.price }
-                    val groupTotal = groupProductTotal + fillTotal
-                    val groupDiscount = when (usage.coupon.type) {
-                        CouponType.FULL_REDUCTION -> usage.count * usage.coupon.discountValue
-                        CouponType.DISCOUNT -> groupTotal * (usage.coupon.discountValue / 100) * usage.count
-                        CouponType.NO_THRESHOLD -> usage.count * usage.coupon.discountValue
-                    }
+                    val groupDiscount = usageDiscount(usage, includeFill = true)
                     // 单人组：全额享受优惠 + 承担全部凑单小物费用
                     userDiscount += groupDiscount
                     userPayable += groupProductTotal - groupDiscount + fillTotal
@@ -396,12 +424,7 @@ class CalculatorViewModel @Inject constructor(
                 val ownerOriginal = userProducts.sumOf { it.originalPrice }
                 val fillTotal = usage.fillProducts.sumOf { it.price }
                 val groupProductTotal = usage.productGroup.sumOf { it.originalPrice }
-                val groupTotal = groupProductTotal + fillTotal
-                val groupDiscount = when (usage.coupon.type) {
-                    CouponType.FULL_REDUCTION -> usage.count * usage.coupon.discountValue
-                    CouponType.DISCOUNT -> groupTotal * (usage.coupon.discountValue / 100) * usage.count
-                    CouponType.NO_THRESHOLD -> usage.count * usage.coupon.discountValue
-                }
+                val groupDiscount = usageDiscount(usage, includeFill = true)
                 val ownersInGroup = usage.productGroup.map { it.ownerId }.distinct()
 
                 if (ownersInGroup.size >= 2) {

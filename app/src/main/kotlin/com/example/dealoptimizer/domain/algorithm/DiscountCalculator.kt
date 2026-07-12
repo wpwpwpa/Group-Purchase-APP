@@ -122,10 +122,10 @@ class DiscountCalculator {
             val grouping = if (products.size <= 16) {
                 findBestExactGroups(products, nonStackableCoupons, fillProducts, useFillProducts, multiUserMode, fairness)
             } else {
-                findGreedyGroups(products, nonStackableCoupons, fillProducts, useFillProducts, multiUserMode)
+                findGreedyGroups(products, nonStackableCoupons, fillProducts, useFillProducts, multiUserMode, fairness)
             }
             usages.addAll(grouping.groups.map { group ->
-                CouponUsage(group.coupon, 1, group.products, group.fillProducts)
+                CouponUsage(group.coupon, 1, group.products, group.fillProducts, discount = group.discount)
             })
             totalDiscount += grouping.discount
         }
@@ -148,7 +148,7 @@ class DiscountCalculator {
 
         return BundleSolution(
             products = products,
-            couponUsages = if (count > 0) listOf(CouponUsage(coupon, count)) else emptyList(),
+            couponUsages = if (count > 0) listOf(CouponUsage(coupon, count, discount = discount)) else emptyList(),
             originalTotal = originalTotal,
             finalPrice = maxOf(originalTotal - discount, 0.0)
         )
@@ -170,7 +170,7 @@ class DiscountCalculator {
         }
 
         val usages = grouping.groups.map { group ->
-            CouponUsage(group.coupon, 1, group.products, group.fillProducts)
+            CouponUsage(group.coupon, 1, group.products, group.fillProducts, discount = group.discount)
         }
 
         return BundleSolution(
@@ -331,7 +331,8 @@ class DiscountCalculator {
         coupons: List<Coupon>,
         fillProducts: List<FillProduct>,
         useFillProducts: Boolean,
-        multiUserMode: Boolean = false
+        multiUserMode: Boolean = false,
+        fairness: FairnessStrategy = FairnessStrategy.NONE
     ): GroupingResult {
         val remaining = products.sortedBy { it.originalPrice }.toMutableList()
         val groups = mutableListOf<CouponCandidate>()
@@ -372,7 +373,10 @@ class DiscountCalculator {
             val filledTotal = groupTotal + groupFillTotal
             val groupDiscount = calculateSingleUseDiscount(filledTotal, coupon)
             if (groupDiscount <= groupFillTotal) break
-            groups.add(CouponCandidate(0, 0, coupon, group, filledTotal, groupDiscount, groupFillProducts))
+            // ownerFairness 按与精确路径一致的口径填充，保证 fairnessScore 在贪心结果里也正确；
+            // 分组选择本身为贪心近似（>16 件性能路径），公平性的「择优」以精确路径(≤16)为准。
+            groups.add(CouponCandidate(0, 0, coupon, group, filledTotal, groupDiscount, groupFillProducts,
+                ownerFairness = ownerFairness(group, groupDiscount)))
             discount += groupDiscount
             groupedTotal += filledTotal
             fillTotal += groupFillTotal
