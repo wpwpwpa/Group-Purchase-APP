@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -109,12 +110,13 @@ fun ProductScreen() {
                     actions = {
                         IconButton(
                             onClick = { viewModel.undo() },
-                            enabled = canUndo
+                            enabled = canUndo,
+                            modifier = Modifier.alpha(if (canUndo) 1f else 0.4f)
                         ) {
                             Icon(
                                 Icons.Default.ArrowBack,
                                 contentDescription = "撤回",
-                                tint = if (canUndo) AppInk else AppMuted
+                                tint = if (canUndo) AppInk else AppMuted.copy(alpha = 0.5f)
                             )
                         }
                         IconButton(onClick = { viewModel.deleteAllProducts() }) {

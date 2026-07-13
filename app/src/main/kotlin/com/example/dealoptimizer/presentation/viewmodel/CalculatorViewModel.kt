@@ -133,8 +133,19 @@ class CalculatorViewModel @Inject constructor(
     }
 
     fun clearCalculation() {
+        clearAllResults()
+    }
+
+    /** 清空全部方案展示态：单/多用户方案、对比候选、分摊等一并复位，避免清空商品后旧方案残留 */
+    private fun clearAllResults() {
         _solution.value = null
         _comparisonResult.value = null
+        _perUserSolutions.value = emptyMap()
+        _combinedSolution.value = null
+        _shares.value = emptyMap()
+        _incrementalDiscount.value = 0.0
+        _candidateOptions.value = emptyList()
+        _selectedCandidateKey.value = null
     }
 
     fun calculateBestPrice(useFillProducts: Boolean = false) {
@@ -224,10 +235,7 @@ class CalculatorViewModel @Inject constructor(
             }
 
             if (users.isEmpty() || scoped.isEmpty() || enabledCoupons.isEmpty()) {
-                _perUserSolutions.value = emptyMap()
-                _combinedSolution.value = null
-                _shares.value = emptyMap()
-                _incrementalDiscount.value = 0.0
+                clearAllResults()
                 return@launch
             }
 

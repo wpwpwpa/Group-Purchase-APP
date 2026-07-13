@@ -1,5 +1,6 @@
 package com.example.dealoptimizer.presentation.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.dealoptimizer.data.model.Product
@@ -101,15 +102,19 @@ class ProductViewModel @Inject constructor(
         abstract suspend fun undo(productRepository: ProductRepository)
     }
 
+    // 命名易误读：InsertUndo 在「删除商品」时入栈（撤销删除=重新插入）；
+    //          DeleteUndo 在「新增商品」时入栈（撤销新增=删除该商品）。二者 undo 方向相反。
     private data class InsertUndo(val product: Product) : UndoCommand() {
         override suspend fun undo(productRepository: ProductRepository) {
-            productRepository.deleteProduct(product.id)
+            // 撤销「删除」= 恢复原商品；用全新自增 id 重插，避免显式回插原 id 触发主键/序列冲突
+            productRepository.insertProduct(product.copy(id = 0))
         }
     }
 
     private data class DeleteUndo(val product: Product) : UndoCommand() {
         override suspend fun undo(productRepository: ProductRepository) {
-            productRepository.insertProduct(product)
+            // 撤销「新增」= 删除刚新增的商品
+            productRepository.deleteProduct(product.id)
         }
     }
 
@@ -121,7 +126,8 @@ class ProductViewModel @Inject constructor(
 
     private data class ClearUndo(val products: List<Product>) : UndoCommand() {
         override suspend fun undo(productRepository: ProductRepository) {
-            products.forEach { productRepository.insertProduct(it) }
+            // 撤销「清空」= 恢复全部；同样用全新自增 id 规避约束冲突
+            products.forEach { productRepository.insertProduct(it.copy(id = 0)) }
         }
     }
 
@@ -137,11 +143,16 @@ class ProductViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             val command = undoMutex.withLock {
                 if (undoStack.isEmpty()) return@launch
-                val cmd = undoStack.removeAt(undoStack.size - 1)
-                _canUndo.value = undoStack.isNotEmpty()
-                cmd
+                undoStack.removeAt(undoStack.size - 1).also {
+                    _canUndo.value = undoStack.isNotEmpty()
+                }
             }
-            command.undo(productRepository)
+            try {
+                command.undo(productRepository)
+            } catch (e: Exception) {
+                // 撤销回放失败不得导致应用崩溃，仅记录便于排查
+                android.util.Log.e("ProductViewModel", "undo failed", e)
+            }
         }
     }
 

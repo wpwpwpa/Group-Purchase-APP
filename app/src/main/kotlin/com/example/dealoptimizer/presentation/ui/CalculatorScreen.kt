@@ -382,23 +382,29 @@ fun CalculatorScreen() {
                     }
                 }
 
-                if (solution == null) {
+                // 空状态：多用户模式以 combinedSolution/candidateOptions 判定是否有内容
+                // （solution 在多用户模式恒为 null，不能单凭它判断），避免清空商品后旧方案残留、常驻空提示
+                val hasContent = if (checkedUsers.isNotEmpty()) {
+                    combinedSolution != null || candidateOptions.isNotEmpty()
+                } else {
+                    solution != null
+                }
+                if (!hasContent) {
                     item {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .fillMaxHeight(),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
+                                .padding(vertical = 48.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             val emptyMessage = when {
-                                allProducts.isEmpty() && allCoupons.isEmpty() -> "请添加商品和优惠券"
-                                allProducts.isEmpty() -> "请添加商品"
+                                allProducts.isEmpty() && allCoupons.isEmpty() -> "暂无商品与优惠券，请先添加"
+                                allProducts.isEmpty() -> "暂无商品，请先添加"
                                 allCoupons.isEmpty() -> "请添加优惠券"
                                 selectedProducts.isEmpty() -> "请至少选择一件商品"
                                 else -> "暂无可用方案"
                             }
-                            Text(text = emptyMessage, color = AppMuted)
+                            Text(text = emptyMessage, color = AppMuted, fontSize = 15.sp)
                         }
                     }
                 }
