@@ -669,7 +669,7 @@ private fun Product.displayColor(_coupons: List<Coupon>): Color =
 
 // 叠加券模式下，实付款距最近门槛（或其倍数）差距：≤20 红、≤40 黄
 private fun priceGapColor(finalPrice: Double, coupons: List<Coupon>): Color {
-    val thresholds = coupons.filter { it.type == CouponType.FULL_REDUCTION && it.threshold > 0.0 }
+    val thresholds = coupons.filter { (it.type == CouponType.FULL_REDUCTION || it.type == CouponType.VOUCHER) && it.threshold > 0.0 }
         .map { it.threshold }
     if (thresholds.isEmpty()) return AppInk
     val minThreshold = thresholds.minOrNull() ?: return AppInk
@@ -720,6 +720,7 @@ fun SolutionCard(
                         com.example.dealoptimizer.data.model.CouponType.FULL_REDUCTION -> usage.count * usage.coupon.discountValue
                         com.example.dealoptimizer.data.model.CouponType.DISCOUNT -> groupTotal * (usage.coupon.discountValue / 100) * usage.count
                         com.example.dealoptimizer.data.model.CouponType.NO_THRESHOLD -> usage.count * usage.coupon.discountValue
+                        com.example.dealoptimizer.data.model.CouponType.VOUCHER -> usage.count * usage.coupon.discountValue
                     }
                     Card(
                         modifier = Modifier
@@ -997,6 +998,30 @@ fun BillSummary(solution: BundleSolution, priceColor: Color = AppInk) {
             }
             Text("¥${"%.2f".format(solution.finalPrice)}", fontWeight = FontWeight.Bold, fontSize = 24.sp, color = priceColor)
         }
+
+        // 单用户：代金券(VOUCHER)买券成本为真实现金支出，单独挂账
+        val voucherCost = solution.couponUsages
+            .filter { it.coupon.type == CouponType.VOUCHER && it.count > 0 }
+            .sumOf { it.coupon.purchasePrice * it.count }
+        if (voucherCost > 0.01) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("代金券买券成本", fontSize = 14.sp, color = AppMuted)
+                Text("¥${"%.2f".format(voucherCost)}", fontSize = 14.sp, color = AppRed)
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom
+            ) {
+                Text("真实应付", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = AppInk)
+                Text("¥${"%.2f".format(solution.finalPrice + voucherCost)}", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AppRed)
+            }
+        }
     }
 }
 
@@ -1168,6 +1193,8 @@ fun SummaryCard(
                 Spacer(modifier = Modifier.height(8.dp))
                 users.forEachIndexed { idx, u ->
                     val share = shares[u.id]
+                    val userCouponCost = share?.couponCost ?: 0.0
+                    val userRealPayable = (share?.payable ?: 0.0) + userCouponCost
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1187,10 +1214,18 @@ fun SummaryCard(
                             textAlign = TextAlign.Center
                         )
                         Text(
-                            text = "¥${"%.2f".format(share?.payable ?: 0.0)}",
+                            text = if (userCouponCost > 0.01) "¥${"%.2f".format(userRealPayable)}" else "¥${"%.2f".format(share?.payable ?: 0.0)}",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF93C5FD)
+                            color = if (userCouponCost > 0.01) Color(0xFFFFE082) else Color(0xFF93C5FD)
+                        )
+                    }
+                    if (userCouponCost > 0.01) {
+                        Text(
+                            text = "含代金券买券成本 ¥${"%.2f".format(userCouponCost)}",
+                            fontSize = 10.sp,
+                            color = Color(0xFFFFE082),
+                            modifier = Modifier.padding(top = 1.dp, bottom = 2.dp)
                         )
                     }
                     if (idx < users.size - 1) Divider(
@@ -1219,6 +1254,7 @@ private fun solutionDiscountRows(solution: BundleSolution): List<DiscountSummary
                     CouponType.FULL_REDUCTION -> usage.count * usage.coupon.discountValue
                     CouponType.DISCOUNT -> groupTotal * (usage.coupon.discountValue / 100) * usage.count
                     CouponType.NO_THRESHOLD -> usage.count * usage.coupon.discountValue
+                    CouponType.VOUCHER -> usage.count * usage.coupon.discountValue
                 }
             }
             DiscountSummaryRow(couponId = couponId, name = coupon.displayNameWithUsageMode(), count = count, discount = discount)
@@ -1331,6 +1367,62 @@ fun PerUserShareCard(
                         Text(text = "（总优惠 ¥${"%.2f".format(combined?.totalDiscount ?: 0.0)}）", fontSize = 12.sp, color = AppRed, modifier = Modifier.padding(start = 4.dp))
                     }
 
+                    // 真实账（含代金券买券成本，谁买谁承担）
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Divider(color = Color(0xFFBBBBBB).copy(alpha = 0.5f), thickness = 0.5.dp)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "真实账（含代金券买券成本）",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AppInk
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    users.forEach { u ->
+                        val share = shares[u.id]
+                        val bookPayable = share?.payable ?: 0.0
+                        val couponCost = share?.couponCost ?: 0.0
+                        val realPayable = bookPayable + couponCost
+                        val discount = share?.discount ?: 0.0
+                        val realNetSave = discount - couponCost
+                        val isSubsidizing = realNetSave < -0.01
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = u.nickname,
+                                fontSize = 12.sp,
+                                color = AppInk,
+                                modifier = Modifier.width(54.dp)
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "账面应付 ¥${"%.2f".format(bookPayable)}" +
+                                        if (couponCost > 0.01) " + 买券 ¥${"%.2f".format(couponCost)}" else "",
+                                    fontSize = 11.sp,
+                                    color = AppMuted
+                                )
+                                Text(
+                                    text = "真实应付 ¥${"%.2f".format(realPayable)}　真实净省 ¥${"%.2f".format(realNetSave)}",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = if (isSubsidizing) AppRed else AppInk
+                                )
+                            }
+                            if (isSubsidizing) {
+                                Text(
+                                    text = "补贴他人",
+                                    fontSize = 11.sp,
+                                    color = Color.White,
+                                    modifier = Modifier
+                                        .background(AppRed, RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+
                     if (hasIncremental) {
                         Spacer(modifier = Modifier.height(10.dp))
                         // 占比框：这 ¥XX 按剩余金额占比
@@ -1428,6 +1520,7 @@ private fun GroupCombinationCard(
         CouponType.FULL_REDUCTION -> usage.count * usage.coupon.discountValue
         CouponType.DISCOUNT -> groupTotal * (usage.coupon.discountValue / 100) * usage.count
         CouponType.NO_THRESHOLD -> usage.count * usage.coupon.discountValue
+        CouponType.VOUCHER -> usage.count * usage.coupon.discountValue
     }
     val groupOwnerIds = usage.productGroup.map { it.ownerId }.distinct()
     val isPool = groupOwnerIds.size >= 2
@@ -1607,6 +1700,7 @@ private fun usageDiscount(usage: CouponUsage): Double {
         CouponType.FULL_REDUCTION -> usage.count * usage.coupon.discountValue
         CouponType.DISCOUNT -> groupTotal * (usage.coupon.discountValue / 100) * usage.count
         CouponType.NO_THRESHOLD -> usage.count * usage.coupon.discountValue
+        CouponType.VOUCHER -> usage.count * usage.coupon.discountValue
     }
 }
 

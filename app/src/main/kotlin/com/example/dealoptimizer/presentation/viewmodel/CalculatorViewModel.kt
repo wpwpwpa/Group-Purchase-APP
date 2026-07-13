@@ -321,11 +321,14 @@ class CalculatorViewModel @Inject constructor(
                     val remaining = maxOf(ownOriginal - usedThreshold, 0.0)
                     val w = if (totalRemaining > 0) remaining / totalRemaining else 0.0
                     val incremental = incrementalDiscount * w
+                    // 代金券购买成本按买券人归属（谁买谁承担），与合并方案实际用券一致
+                    val ownCouponCost = voucherCostByOwner(combined.couponUsages)[u.id] ?: 0.0
                     u.id to MergedShare(
                         ownOriginal = ownOriginal,
                         remaining = remaining,
                         discount = baseDiscount + incremental,
-                        payable = basePayable - incremental
+                        payable = basePayable - incremental,
+                        couponCost = ownCouponCost
                     )
                 }
             } else {
@@ -386,10 +389,23 @@ class CalculatorViewModel @Inject constructor(
             usage.productGroup.sumOf { it.originalPrice }
         }
         return when (usage.coupon.type) {
-            CouponType.FULL_REDUCTION -> usage.count * usage.coupon.discountValue
+            CouponType.FULL_REDUCTION, CouponType.VOUCHER -> usage.count * usage.coupon.discountValue
             CouponType.DISCOUNT -> groupTotal * (usage.coupon.discountValue / 100) * usage.count
             CouponType.NO_THRESHOLD -> usage.count * usage.coupon.discountValue
         }
+    }
+
+    /**
+     * 代金券(VOUCHER)购买成本按买券人(ownerId)聚合。
+     * 谁买谁承担：每张被实际用到的代金券，其 purchasePrice 全额记到 ownerId 头上；
+     * 用 count 次则成本 = purchasePrice × count（一张券被用多次 = 多张券）。
+     * 注意：仅 VOUCHER 类型参与——FULL_REDUCTION 的 purchasePrice 已折进 discountValue，不能重复算。
+     */
+    private fun voucherCostByOwner(usages: List<CouponUsage>): Map<Long, Double> {
+        return usages
+            .filter { it.coupon.type == CouponType.VOUCHER && it.count > 0 }
+            .groupBy { it.coupon.ownerId }
+            .mapValues { (_, list) -> list.sumOf { it.coupon.purchasePrice * it.count } }
     }
 
     /**
@@ -405,11 +421,14 @@ class CalculatorViewModel @Inject constructor(
     ): Map<Long, MergedShare> {
         val allGroupedProductIds = (perUserLockedUsages.values.flatten().flatMap { it.productGroup } +
             crossPool.couponUsages.flatMap { it.productGroup }).map { it.id }.toSet()
+        // 代金券购买成本按买券人聚合（谁买谁承担），一次性算好供每位用户查表
+        val voucherCost = voucherCostByOwner(perUserLockedUsages.values.flatten() + crossPool.couponUsages)
         return users.associate { u ->
             val baseOriginal = scoped.filter { it.ownerId == u.id }.sumOf { it.originalPrice }
             var userDiscount = 0.0
             var userPayable = 0.0
             var allocatedFillCost = 0.0
+            val ownCouponCost = voucherCost[u.id] ?: 0.0
 
             // 阶段1：perUser 单人组（该用户已锁定的自组商品）
             val lockedUsages = perUserLockedUsages[u.id]
@@ -467,7 +486,8 @@ class CalculatorViewModel @Inject constructor(
                 ownOriginal = baseOriginal + allocatedFillCost,
                 remaining = baseOriginal + allocatedFillCost - userDiscount,
                 discount = userDiscount,
-                payable = userPayable
+                payable = userPayable,
+                couponCost = ownCouponCost
             )
         }
     }

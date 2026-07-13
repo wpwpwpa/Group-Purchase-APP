@@ -30,6 +30,7 @@ import com.example.dealoptimizer.presentation.viewmodel.CouponViewModel
 fun CouponScreen() {
     val viewModel: CouponViewModel = hiltViewModel()
     val coupons = viewModel.allCoupons.collectAsState(emptyList()).value
+    val users = viewModel.allUsers.collectAsState(emptyList()).value
     val isStackableMode by viewModel.isStackableMode.collectAsState()
     var showDialog by remember { mutableStateOf(false) }
     var editingCoupon by remember { mutableStateOf<Coupon?>(null) }
@@ -40,6 +41,7 @@ fun CouponScreen() {
     var maxUsages by remember { mutableStateOf("") }
     var isStackable by remember { mutableStateOf(false) }
     var isSingleUse by remember { mutableStateOf(false) }
+    var buyerId by remember { mutableStateOf(1L) }
 
     val filteredCoupons = coupons.filter { it.isStackable == isStackableMode }
 
@@ -60,6 +62,7 @@ fun CouponScreen() {
                         maxUsages = ""
                         isStackable = isStackableMode
                         isSingleUse = !isStackableMode
+                        buyerId = 1L
                         showDialog = true
                     }) {
                         Icon(Icons.Default.Add, contentDescription = "添加优惠券")
@@ -127,13 +130,14 @@ fun CouponScreen() {
                                 coupon = coupon,
                                 onEdit = {
                                     editingCoupon = coupon
-                                    type = CouponType.FULL_REDUCTION
+                                    type = coupon.type
                                     threshold = if (coupon.threshold == 0.0) "" else coupon.threshold.toString()
                                     purchasePrice = if (coupon.purchasePrice == 0.0) "" else coupon.purchasePrice.toString()
                                     discountValue = coupon.discountValue.toString()
                                     maxUsages = if (coupon.maxUsages == Int.MAX_VALUE) "" else coupon.maxUsages.toString()
                                     isStackable = coupon.isStackable
                                     isSingleUse = !coupon.isStackable
+                                    buyerId = coupon.ownerId
                                     showDialog = true
                                 },
                                 onEnabledChange = { enabled ->
@@ -154,40 +158,151 @@ fun CouponScreen() {
             title = { Text(if (editingCoupon == null) "添加优惠券" else "编辑优惠券") },
             text = {
                 Column {
-                    OutlinedTextField(
-                        label = { Text("满减门槛（满多少可用）") },
-                        value = threshold,
-                        onValueChange = { threshold = it },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        modifier = Modifier.fillMaxWidth()
+                    // 券类型选择
+                    Text(
+                        text = "券类型",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AppInk,
+                        modifier = Modifier.padding(bottom = 4.dp)
                     )
-                    if (type == CouponType.FULL_REDUCTION) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedTextField(
-                            label = { Text("优惠券购买价格") },
-                            value = purchasePrice,
-                            onValueChange = { purchasePrice = it },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            modifier = Modifier.fillMaxWidth()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        val typeOptions = listOf(
+                            CouponType.FULL_REDUCTION to "满减",
+                            CouponType.DISCOUNT to "折扣",
+                            CouponType.NO_THRESHOLD to "无门槛",
+                            CouponType.VOUCHER to "代金券"
                         )
-                        val thresholdValue = threshold.toDoubleOrNull() ?: 0.0
-                        val purchaseValue = purchasePrice.toDoubleOrNull() ?: 0.0
-                        val calculatedDiscount = maxOf(thresholdValue - purchaseValue, 0.0)
-                        Text(
-                            text = "优惠金额: ¥${"%.2f".format(calculatedDiscount)}",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colors.primary,
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
-                    } else {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedTextField(
-                            label = { Text("优惠金额/折扣比例") },
-                            value = discountValue,
-                            onValueChange = { discountValue = it },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        typeOptions.forEach { (t, label) ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (type == t) MaterialTheme.colors.primary else AppSurface)
+                                    .clickable { type = t }
+                                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontSize = 12.sp,
+                                    color = if (type == t) Color.White else AppMuted
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    when (type) {
+                        CouponType.FULL_REDUCTION -> {
+                            OutlinedTextField(
+                                label = { Text("满减门槛（满多少可用）") },
+                                value = threshold,
+                                onValueChange = { threshold = it },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedTextField(
+                                label = { Text("优惠券购买价格（实付买价）") },
+                                value = purchasePrice,
+                                onValueChange = { purchasePrice = it },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            val thresholdValue = threshold.toDoubleOrNull() ?: 0.0
+                            val purchaseValue = purchasePrice.toDoubleOrNull() ?: 0.0
+                            val calculatedDiscount = maxOf(thresholdValue - purchaseValue, 0.0)
+                            Text(
+                                text = "优惠金额: ¥${"%.2f".format(calculatedDiscount)}",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colors.primary,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
+                        CouponType.DISCOUNT -> {
+                            OutlinedTextField(
+                                label = { Text("满减门槛（满多少可用）") },
+                                value = threshold,
+                                onValueChange = { threshold = it },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedTextField(
+                                label = { Text("折扣比例（如 90=打9折）") },
+                                value = discountValue,
+                                onValueChange = { discountValue = it },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                        CouponType.NO_THRESHOLD -> {
+                            OutlinedTextField(
+                                label = { Text("立减金额") },
+                                value = discountValue,
+                                onValueChange = { discountValue = it },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                        CouponType.VOUCHER -> {
+                            // 代金券（买面值）：面值 F = 门槛、抵扣额 = F，买价 P 单独记，谁买谁承担
+                            OutlinedTextField(
+                                label = { Text("面值（满面值才可用，等同门槛）") },
+                                value = threshold,
+                                onValueChange = { threshold = it },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedTextField(
+                                label = { Text("买价（实付买价）") },
+                                value = purchasePrice,
+                                onValueChange = { purchasePrice = it },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            val faceValue = threshold.toDoubleOrNull() ?: 0.0
+                            val purchaseValue = purchasePrice.toDoubleOrNull() ?: 0.0
+                            Text(
+                                text = "抵扣面值: ¥${"%.2f".format(faceValue)}　净省: ¥${"%.2f".format(maxOf(faceValue - purchaseValue, 0.0))}",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colors.primary,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            // 买券人（谁买谁承担）
+                            Text(
+                                text = "买券人",
+                                fontSize = 12.sp,
+                                color = AppMuted,
+                                modifier = Modifier.padding(bottom = 2.dp)
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                users.forEach { u ->
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(if (buyerId == u.id) MaterialTheme.colors.primary else AppSurface)
+                                            .clickable { buyerId = u.id }
+                                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                                    ) {
+                                        Text(
+                                            text = u.nickname,
+                                            fontSize = 12.sp,
+                                            color = if (buyerId == u.id) Color.White else AppMuted
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
@@ -231,10 +346,11 @@ fun CouponScreen() {
                     onClick = {
                         val thresholdValue = threshold.toDoubleOrNull() ?: 0.0
                         val purchaseValue = purchasePrice.toDoubleOrNull() ?: 0.0
-                        val finalDiscountValue = if (type == CouponType.FULL_REDUCTION) {
-                            maxOf(thresholdValue - purchaseValue, 0.0)
-                        } else {
-                            discountValue.toDoubleOrNull() ?: 0.0
+                        // 代金券：面值 = 抵扣额（不折买价）；满减：优惠 = 门槛 − 买价（沿用老逻辑）
+                        val finalDiscountValue = when (type) {
+                            CouponType.VOUCHER -> thresholdValue
+                            CouponType.FULL_REDUCTION -> maxOf(thresholdValue - purchaseValue, 0.0)
+                            else -> discountValue.toDoubleOrNull() ?: 0.0
                         }
                         val coupon = Coupon(
                             id = editingCoupon?.id ?: 0,
@@ -246,7 +362,8 @@ fun CouponScreen() {
                             maxUsages = maxUsages.toIntOrNull() ?: Int.MAX_VALUE,
                             isStackable = isStackable,
                             isSingleUse = isSingleUse,
-                            isEnabled = editingCoupon?.isEnabled ?: true
+                            isEnabled = editingCoupon?.isEnabled ?: true,
+                            ownerId = buyerId
                         )
                         if (editingCoupon == null) {
                             viewModel.insertCoupon(
@@ -257,7 +374,8 @@ fun CouponScreen() {
                                 coupon.discountValue,
                                 coupon.maxUsages,
                                 coupon.isStackable,
-                                coupon.isSingleUse
+                                coupon.isSingleUse,
+                                coupon.ownerId
                             )
                         } else {
                             viewModel.updateCoupon(coupon)
@@ -282,6 +400,7 @@ fun CouponType.displayName(): String {
         CouponType.FULL_REDUCTION -> "满减"
         CouponType.DISCOUNT -> "折扣"
         CouponType.NO_THRESHOLD -> "无门槛"
+        CouponType.VOUCHER -> "代金券"
     }
 }
 
@@ -291,6 +410,7 @@ private fun couponAutoName(type: CouponType, isStackable: Boolean, threshold: Do
         CouponType.FULL_REDUCTION -> "满${threshold.cleanAmount()}减${discountValue.cleanAmount()}"
         CouponType.DISCOUNT -> "满${threshold.cleanAmount()}打${discountValue.cleanAmount()}折"
         CouponType.NO_THRESHOLD -> "无门槛减${discountValue.cleanAmount()}"
+        CouponType.VOUCHER -> "面值${threshold.cleanAmount()}"
     }
     return "$prefix$name"
 }
@@ -323,6 +443,7 @@ fun Coupon.getDescription(): String {
         }
         CouponType.DISCOUNT -> "${discountValue}折"
         CouponType.NO_THRESHOLD -> "立减¥${"%.2f".format(discountValue)}"
+        CouponType.VOUCHER -> "面值¥${"%.2f".format(threshold)}，¥${"%.2f".format(purchasePrice)}购买"
     }
 }
 

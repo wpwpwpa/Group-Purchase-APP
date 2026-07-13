@@ -4,8 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.dealoptimizer.data.model.Coupon
 import com.example.dealoptimizer.data.model.CouponType
+import com.example.dealoptimizer.data.model.User
 import com.example.dealoptimizer.data.repository.CouponModeRepository
 import com.example.dealoptimizer.data.repository.CouponRepository
+import com.example.dealoptimizer.data.repository.UserRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -16,10 +18,13 @@ import javax.inject.Inject
 @HiltViewModel
 class CouponViewModel @Inject constructor(
     private val couponRepository: CouponRepository,
-    private val couponModeRepository: CouponModeRepository
+    private val couponModeRepository: CouponModeRepository,
+    private val userRepository: UserRepository
 ) : ViewModel() {
 
     val allCoupons: Flow<List<Coupon>> = couponRepository.allCoupons
+
+    val allUsers: Flow<List<User>> = userRepository.allUsers
 
     val isStackableMode: StateFlow<Boolean> = couponModeRepository.isStackableMode
 
@@ -35,7 +40,8 @@ class CouponViewModel @Inject constructor(
         discountValue: Double,
         maxUsages: Int = Int.MAX_VALUE,
         isStackable: Boolean = false,
-        isSingleUse: Boolean = false
+        isSingleUse: Boolean = false,
+        ownerId: Long = 1
     ) {
         viewModelScope.launch(Dispatchers.IO) {
             couponRepository.insertCoupon(
@@ -47,7 +53,8 @@ class CouponViewModel @Inject constructor(
                     discountValue = discountValue,
                     maxUsages = maxUsages,
                     isStackable = isStackable,
-                    isSingleUse = isSingleUse
+                    isSingleUse = isSingleUse,
+                    ownerId = ownerId
                 )
             )
         }

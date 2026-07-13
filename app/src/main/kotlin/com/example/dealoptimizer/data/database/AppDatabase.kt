@@ -15,7 +15,7 @@ import com.example.dealoptimizer.data.model.User
 
 @Database(
     entities = [Product::class, Coupon::class, FillProduct::class, User::class],
-    version = 7,
+    version = 8,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -80,6 +80,14 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_6_7 = object : Migration(6, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE products ADD COLUMN color TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 代金券(VOUCHER)需要记录买券人，用于「谁买谁承担」分摊。
+                // 新列默认本人(1)，老券自动归属本人，行为不变、数据不丢。
+                db.execSQL("ALTER TABLE coupons ADD COLUMN ownerId INTEGER NOT NULL DEFAULT 1")
             }
         }
     }

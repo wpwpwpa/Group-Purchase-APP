@@ -187,7 +187,7 @@ class DiscountCalculator {
         var bestDiscount = 0.0
 
         when (coupon.type) {
-            CouponType.FULL_REDUCTION -> {
+            CouponType.FULL_REDUCTION, CouponType.VOUCHER -> {
                 if (totalAmount >= coupon.threshold) {
                     val usageLimit = coupon.usageLimit()
                     bestCount = if (coupon.isStackable && coupon.threshold > 0.0) {
@@ -225,7 +225,7 @@ class DiscountCalculator {
         val suggestions = mutableListOf<FillSuggestion>()
 
         val fullReductionCoupons = coupons
-            .filter { it.isEnabled && it.type == CouponType.FULL_REDUCTION && it.threshold > currentTotal }
+            .filter { it.isEnabled && (it.type == CouponType.FULL_REDUCTION || it.type == CouponType.VOUCHER) && it.threshold > currentTotal }
             .sortedBy { it.threshold }
 
         if (fullReductionCoupons.isEmpty()) {
@@ -466,7 +466,7 @@ class DiscountCalculator {
 
     private fun calculateSingleUseDiscount(totalAmount: Double, coupon: Coupon): Double {
         val discount = when (coupon.type) {
-            CouponType.FULL_REDUCTION -> coupon.discountValue
+            CouponType.FULL_REDUCTION, CouponType.VOUCHER -> coupon.discountValue
             CouponType.DISCOUNT -> totalAmount * (coupon.discountValue / 100)
             CouponType.NO_THRESHOLD -> coupon.discountValue
         }
